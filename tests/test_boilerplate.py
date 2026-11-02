@@ -25,7 +25,8 @@ def test_default_threshold_is_strict():
 
 def test_trivial_formatting_still_folds():
     assert bp.match(EA.upper().replace(",", "") + "  ", "Entire Agreement", LIB)[0] == "entire-agreement"
-    assert bp.match(EA.replace("with respect to its", "with respect to the"), "", LIB)[0] == "entire-agreement"
+    # "its" -> "the" is no longer treated as filler (determiners can carry meaning)
+    assert bp.match(EA.replace("with respect to its", "with respect to the"), "", LIB) is None
 
 
 @pytest.mark.parametrize("variant", [
@@ -87,3 +88,42 @@ def test_library_validation(tmp_path, body):
     lib = tmp_path / "bad.yaml"; lib.write_text(body)
     with pytest.raises(ValueError):
         bp.load_library(lib)
+
+
+# --- draft 3: meaning-bearing small words and word order ---------------------
+@pytest.mark.parametrize("variant", [
+    NOTICES.replace("by courier or by email", "by courier and by email"),   # measured 98.4
+    NOTICES.replace("All notices", "Any notices"),                          # measured 98.7
+    NOTICES.replace("All notices", "Each notice"),
+    NOTICES.replace("shall be in writing", "may be in writing"),
+    NOTICES.replace("shall be in writing", "must be in writing"),
+    NOTICES.replace("by hand, by courier or by email", "by hand, by courier or email"),
+])
+def test_small_meaning_words_do_not_fold(variant):
+    assert similarity.ratio(variant, NOTICES, keep_numbers=True) >= 95  # fuzzy score alone would fold
+    assert bp.match(variant, "Notices", LIB) is None
+
+
+def test_role_swap_does_not_fold():
+    lib = {"threshold": 95, "clauses": [{"id": "indem", "text": "Supplier indemnifies Customer against third-party claims."}]}
+    assert bp.match("Supplier indemnifies Customer against third-party claims.", "", lib)[0] == "indem"
+    swapped = "Customer indemnifies Supplier against third-party claims."
+    assert bp.match(swapped, "", lib, threshold=0) is None
+    ok, why = bp.safe_to_fold(swapped, lib["clauses"][0]["text"])
+    assert not ok and "order" in why
+
+
+@pytest.mark.parametrize("variant", [
+    NOTICES.upper(),
+    NOTICES.replace(",", "").replace(".", ";"),
+    "  " + NOTICES.replace(" ", "\n  ") + "\n",
+    NOTICES.replace("All notices", "All the notices"),
+])
+def test_case_punctuation_whitespace_still_fold(variant):
+    assert bp.match(variant, "Notices", LIB)[0] == "notices"
+
+
+def test_filler_list_has_no_meaning_words():
+    for w in ("and", "or", "nor", "any", "all", "each", "every", "either", "neither", "both",
+              "may", "must", "will", "shall", "not", "of", "to", "by", "this", "that", "its", "their"):
+        assert w not in bp.FILLER

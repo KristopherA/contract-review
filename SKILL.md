@@ -47,7 +47,10 @@ python3 $SKILL/scripts/contract_review.py <command> ...
 
 1. `python3 $SKILL/scripts/contract_review.py diff OLD NEW > changes.json`
    Each change has `id`, `kinds` (modified, renumbered, moved, retitled, added,
-   removed), `old`, `new`, and `word_diff` ops.
+   removed, split, merged), `old`, `new`, `score`, `low_confidence` and `word_diff` ops.
+   If `low_confidence` is true (score under 65), say in its summary that the
+   pairing is uncertain and may be two different clauses; never present it as a
+   plain edit.
 2. Write one plain-English line per change id into `summaries.json`
    (`{"c1": "...", ...}`). State what changed and its practical effect; do not
    paraphrase unchanged text. Renumber/move-only changes: say so in a few words.

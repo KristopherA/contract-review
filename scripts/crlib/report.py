@@ -19,10 +19,13 @@ def diff_markdown(changes, old_name, new_name, summaries=None) -> str:
              "| # | Change | Old | New | Summary |", "|---|---|---|---|---|"]
     for c in changes:
         summ = summaries.get(c["id"], "_(summary pending)_").replace("|", "\\|").replace("\n", " ")
-        lines.append(f"| {c['id']} | {', '.join(c['kinds'])} | {_lbl(c['old'])} | {_lbl(c['new'])} | {summ} |")
+        kinds = ", ".join(c["kinds"]) + (" ⚠ low-confidence match" if c.get("low_confidence") else "")
+        lines.append(f"| {c['id']} | {kinds} | {_lbl(c['old'])} | {_lbl(c['new'])} | {summ} |")
     lines.append("")
     for c in changes:
         lines += [f"## {c['id']}: {_lbl(c['new'] or c['old'])} ({', '.join(c['kinds'])})", ""]
+        if c.get("low_confidence"):
+            lines += [f"> ⚠ Low-confidence pairing (score {c['score']}): check these really are the same clause.", ""]
         if c["id"] in summaries:
             lines += [f"**Summary:** {summaries[c['id']]}", ""]
         if c["word_diff"]:

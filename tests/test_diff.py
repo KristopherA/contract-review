@@ -152,3 +152,34 @@ def test_difflib_fallback_alignment_near_threshold(monkeypatch, fixtures):
     ea = next(c["text"] for c in lib["clauses"] if c["id"] == "entire-agreement")
     assert bp.match(ea, "", lib)[0] == "entire-agreement"
     assert bp.match(ea.replace("constitutes", "does not constitute"), "", lib) is None
+
+
+# --- draft 3: low-confidence pairings -----------------------------------------
+GOV = ("This Agreement is governed by the laws of Exampleland, and the courts of Example City "
+       "have exclusive jurisdiction over any dispute.")
+JUR = ("The courts of Example City have exclusive jurisdiction over any dispute arising under this "
+       "Agreement, and each party submits to them.")
+CAP = ("Each party's total liability under this Agreement for any claim is capped at the fees paid in "
+       "the prior twelve months.")
+IND = ("Each party shall indemnify the other for any third-party claim under this Agreement, and that "
+       "liability is not capped.")
+
+
+@pytest.mark.parametrize("old,new", [(("Governing Law", GOV), ("Jurisdiction", JUR)),
+                                     (("Liability Cap", CAP), ("Indemnity", IND))])
+def test_low_confidence_flag_and_report(old, new):
+    from crlib.report import diff_markdown
+    a, b = _s(1, *old), _s(1, *new)
+    score = diffing.pair_score(a, b)
+    assert diffing.DEFAULT_MATCH <= score < diffing.LOW_CONFIDENCE  # weak but accepted pairing
+    changes = diffing.diff_documents([a], [b])
+    assert len(changes) == 1 and changes[0]["low_confidence"] is True
+    md = diff_markdown(changes, "a", "b")
+    assert "low-confidence match" in md and "Low-confidence pairing" in md
+
+
+def test_strong_pair_not_low_confidence():
+    from crlib.report import diff_markdown
+    changes = diffing.diff_documents([_s(1, "Payment", A)], [_s(1, "Payment", A + " Extra words.")])
+    assert changes[0]["low_confidence"] is False
+    assert "low-confidence" not in diff_markdown(changes, "a", "b").lower()

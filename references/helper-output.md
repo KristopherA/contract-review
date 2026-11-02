@@ -29,11 +29,16 @@ A pair with a rewritten title still matches when content similarity alone is ≥
 `split` (with `split_into[]`) = one old section became this one plus neighbours;
 `merged` (with `merged_from[]`) = several old sections became this one. Accepted only
 when the combined text is ≥ 80 similar and ≥ 10 points better than the single pair;
-`word_diff` then runs over the concatenated text.
+`word_diff` then runs over the concatenated text. The absorbed sections are not
+reported separately, so they lose their `added`/`removed` label; they appear only
+inside `split_into[]`/`merged_from[]` of the section that absorbed them.
+`low_confidence: true` marks pairs scoring under 65 (e.g. "Governing Law" paired with
+"Jurisdiction"); the Markdown report marks them with ⚠.
 
 ## Limits
 Input files: DOCX `word/document.xml` ≤ 20 MB uncompressed and compression ratio ≤ 100
-(read in bounded chunks; DOCTYPE/ENTITY rejected); PDF ≤ 50 MB and ≤ 500 pages;
+(read in bounded chunks; DOCTYPE/ENTITY rejected, then parsed with defusedxml); PDF ≤ 50 MB and ≤ 500 pages (counted up front with pdfinfo, or pypdf as the fallback,
+so longer files are refused rather than truncated);
 pdftotext timeout 120 s (then falls back to pypdf in `auto`). Errors print
 `error: ...` and exit 2.
 

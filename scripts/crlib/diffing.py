@@ -10,6 +10,7 @@ from .similarity import ratio, token_ratio
 
 TITLE_W, CONTENT_W = 0.35, 0.65
 DEFAULT_MATCH = 55.0
+LOW_CONFIDENCE = 65.0     # pairs scoring below this are flagged for the reader
 CONTENT_FALLBACK = 65.0   # match on content alone when the title was rewritten
 SPLIT_MERGE_MIN = 80.0    # combined text must reach this similarity
 SPLIT_MERGE_GAIN = 10.0   # ...and beat the single-section similarity by this much
@@ -147,7 +148,8 @@ def diff_documents(old: list[Section], new: list[Section], threshold: float = DE
             if not kinds and not include_unchanged:
                 continue
             ch = {"kinds": kinds or ["unchanged"], "old": a.to_dict(), "new": b.to_dict(),
-                  "score": round(score, 1), "word_diff": ops if text_changed else []}
+                  "score": round(score, 1), "low_confidence": score < LOW_CONFIDENCE,
+                  "word_diff": ops if text_changed else []}
             if extra_new:
                 ch["split_into"] = [x.to_dict() for x in extra_new]
             if extra_old:

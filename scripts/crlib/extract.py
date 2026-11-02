@@ -8,6 +8,12 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+try:  # pinned in requirements.txt; stdlib + DOCTYPE guard if it is missing
+    from defusedxml import ElementTree as _SAFE_ET
+    from defusedxml import DefusedXmlException as _DefusedError
+except ImportError:  # pragma: no cover - exercised only without defusedxml
+    _SAFE_ET, _DefusedError = None, ()
+
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 MAX_XML_BYTES = 20 * 1024 * 1024      # uncompressed word/document.xml
@@ -38,6 +44,35 @@ def _pdf_pdftotext(path: Path, timeout: float) -> str:
     return res.stdout
 
 
+def _page_count_pdfinfo(path: Path, timeout: float) -> int | None:
+    exe = shutil.which("pdfinfo")
+    if not exe:
+        return None
+    try:
+        res = subprocess.run([exe, "--", str(path)], capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    m = re.search(r"^Pages:\s+(\d+)", res.stdout, re.M) if res.returncode == 0 else None
+    return int(m[1]) if m else None
+
+
+def _page_count_pypdf(path: Path) -> int:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise ExtractionError("cannot count PDF pages: neither pdfinfo nor pypdf is available") from exc
+    try:
+        return len(PdfReader(str(path)).pages)
+    except Exception as exc:
+        raise ExtractionError(f"{path.name}: unreadable PDF ({type(exc).__name__}: {exc})") from exc
+
+
+def pdf_page_count(path: Path, timeout: float = PDFTOTEXT_TIMEOUT) -> int:
+    """pdfinfo first, pypdf as the fallback. Never silently truncate."""
+    n = _page_count_pdfinfo(path, timeout)
+    return n if n is not None else _page_count_pypdf(path)
+
+
 def _pdf_pypdf(path: Path) -> str:
     try:
         from pypdf import PdfReader
@@ -57,6 +92,10 @@ def _pdf_pypdf(path: Path) -> str:
 def extract_pdf(path: Path, backend: str = "auto", timeout: float = PDFTOTEXT_TIMEOUT) -> str:
     if path.stat().st_size > MAX_PDF_BYTES:
         raise ExtractionError(f"{path.name}: larger than {MAX_PDF_BYTES // 2**20} MB")
+    pages = pdf_page_count(path, timeout)
+    if pages > MAX_PDF_PAGES:
+        raise ExtractionError(f"{path.name}: {pages} pages; the limit is {MAX_PDF_PAGES} "
+                              "(split the PDF; nothing is truncated silently)")
     if backend in ("auto", "pdftotext"):
         try:
             text = _pdf_pdftotext(path, timeout)
@@ -98,7 +137,9 @@ def extract_docx(path: Path) -> str:
     if re.search(rb"<!\s*(DOCTYPE|ENTITY)", xml, re.IGNORECASE):
         raise ExtractionError(f"{path.name}: DOCTYPE/ENTITY declarations are not allowed")
     try:
-        root = ET.fromstring(xml)
+        root = (_SAFE_ET.fromstring(xml, forbid_dtd=True) if _SAFE_ET else ET.fromstring(xml))
+    except _DefusedError as exc:
+        raise ExtractionError(f"{path.name}: unsafe XML rejected ({type(exc).__name__})") from exc
     except ET.ParseError as exc:
         raise ExtractionError(f"{path.name}: corrupt document.xml ({exc})") from exc
     paras = []

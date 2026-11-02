@@ -59,7 +59,7 @@ Python 3.10+. Poppler's `pdftotext` is optional but preferred for PDFs
 (`brew install poppler` or `apt install poppler-utils`); `pypdf` is the fallback.
 
 ```sh
-python3 -m pip install --user -r requirements.txt   # pypdf, rapidfuzz, PyYAML (pinned)
+python3 -m pip install --user -r requirements.txt   # pypdf, rapidfuzz, PyYAML, defusedxml (pinned)
 ```
 
 ### 3. Install the skill
@@ -106,7 +106,9 @@ visible for review.
 
 DOCX parts over 20 MB uncompressed or with a compression ratio over 100, DOCX files
 with DOCTYPE/ENTITY declarations, PDFs over 50 MB or 500 pages are refused with a
-clean `error:` message (exit 2). pdftotext has a 120 s timeout and falls back to pypdf.
+clean `error:` message (exit 2). Page counts are checked first (pdfinfo, else pypdf), so
+long PDFs are refused, never truncated. pdftotext has a 120 s timeout and falls back to
+pypdf. DOCX XML is parsed with defusedxml (DTDs forbidden).
 
 ## Development
 

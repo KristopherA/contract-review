@@ -143,4 +143,42 @@ def test_pdftotext_dash_filename(tmp_path, monkeypatch):
     real = ex.subprocess.run
     monkeypatch.setattr(ex.subprocess, "run", lambda cmd, **k: calls.append(cmd) or real(cmd, **k))
     extract_text("-n.pdf", "pdftotext")
-    assert calls[0][-3] == "--" and calls[0][-2].startswith("/")
+    info = next(c for c in calls if c[0].endswith("pdfinfo"))
+    text = next(c for c in calls if c[0].endswith("pdftotext"))
+    assert info[-2] == "--" and info[-1].startswith("/")
+    assert text[-3] == "--" and text[-2].startswith("/")
+
+
+# --- draft 3: refuse, never truncate, long PDFs -------------------------------
+def test_501_page_pdf_refused_in_every_mode(tmp_path):
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    for _ in range(501):
+        w.add_blank_page(width=200, height=200)
+    p = tmp_path / "long.pdf"
+    with open(p, "wb") as fh:
+        w.write(fh)
+    assert ex.pdf_page_count(p) == 501
+    for backend in ("auto", "pdftotext", "pypdf"):
+        with pytest.raises(ExtractionError, match="501 pages"):
+            extract_text(p, backend)
+
+
+def test_page_count_falls_back_to_pypdf(pdf_factory, monkeypatch):
+    p = pdf_factory("count.pdf", LINES)
+    monkeypatch.setattr(ex.shutil, "which", lambda _: None)
+    assert ex.pdf_page_count(p) == 1
+    monkeypatch.setattr(ex, "_page_count_pypdf", lambda _p: 600)
+    with pytest.raises(ExtractionError, match="600 pages"):
+        extract_text(p, "auto")
+
+
+def test_monkeypatched_pdfinfo_count_blocks_pdftotext(pdf_factory, monkeypatch):
+    p = pdf_factory("fake.pdf", LINES)
+    monkeypatch.setattr(ex, "_page_count_pdfinfo", lambda _p, _t: 600)
+    with pytest.raises(ExtractionError, match="limit is 500"):
+        extract_text(p, "pdftotext")
+
+
+def test_defusedxml_in_use():
+    assert ex._SAFE_ET is not None

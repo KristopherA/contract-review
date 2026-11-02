@@ -6,8 +6,10 @@ folds only if, compared with the library clause:
   * similarity (numbers kept) >= threshold (default 95), and
   * the sets of numbers/amounts are identical, and
   * the sets of negation/exception words are identical, and
-  * no content words were added or dropped (only whitespace, punctuation,
-    case or a small list of filler words may differ).
+  * the word sequences, compared in order with only articles ("the", "a",
+    "an") and "hereby" ignored, are identical. So only whitespace, punctuation,
+    case and those words may differ; "or"->"and", "all"->"any" or swapping who
+    does what ("A indemnifies B" vs "B indemnifies A") never folds.
 """
 from __future__ import annotations
 
@@ -28,8 +30,10 @@ NEGATION_EXCEPTION = ("shall not", "must not", "may not", "will not", "does not"
                       "provided that", "subject to", "not", "no", "never", "none", "nor",
                       "without", "except", "excluding", "unless", "notwithstanding", "save",
                       "only", "cannot")
-FILLER = {"the", "a", "an", "this", "that", "these", "those", "its", "their", "such",
-          "hereby", "herein", "hereof", "hereunder", "and", "or", "of", "to", "in", "by", "any", "all"}
+# Deliberately tiny. Quantifiers (all, any, each, every, either, neither, both),
+# connectives (and, or, nor), modals (may, must, will, shall), prepositions and
+# pronouns/determiners (this, that, its, their, such) all carry meaning.
+FILLER = frozenset({"the", "a", "an", "hereby"})
 
 
 def numbers(text: str) -> frozenset:
@@ -52,6 +56,21 @@ def content_delta(a: str, b: str) -> Counter:
     return (ca - cb) + (cb - ca)
 
 
+def word_sequence(text: str) -> list[str]:
+    return [w for w in WORD.findall(text.lower()) if w not in FILLER]
+
+
+def sequence_changes(a: str, b: str) -> list[str]:
+    """Order-aware word diff ignoring filler; returns the changed words, if any."""
+    from difflib import SequenceMatcher
+    sa, sb = word_sequence(a), word_sequence(b)
+    out = []
+    for op, i1, i2, j1, j2 in SequenceMatcher(None, sa, sb, autojunk=False).get_opcodes():
+        if op != "equal":
+            out.append(f"{' '.join(sa[i1:i2]) or '∅'}→{' '.join(sb[j1:j2]) or '∅'}")
+    return out
+
+
 def safe_to_fold(section_text: str, clause_text: str) -> tuple[bool, str]:
     if numbers(section_text) != numbers(clause_text):
         return False, "numbers or amounts differ"
@@ -60,6 +79,9 @@ def safe_to_fold(section_text: str, clause_text: str) -> tuple[bool, str]:
     delta = content_delta(section_text, clause_text)
     if delta:
         return False, "content words added or dropped: " + ", ".join(sorted(delta)[:8])
+    seq = sequence_changes(section_text, clause_text)
+    if seq:
+        return False, "word order or wording differs: " + "; ".join(seq[:5])
     return True, ""
 
 

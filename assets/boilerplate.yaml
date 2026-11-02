@@ -1,0 +1,35 @@
+# User-editable library of standard clauses. Sections whose text matches one of
+# these at or above `threshold` (0-100, rapidfuzz ratio on normalised text) are
+# folded away in outlines. Add your own; a per-clause `threshold` overrides.
+threshold: 85
+clauses:
+  - id: entire-agreement
+    title: Entire Agreement
+    text: >-
+      This Agreement constitutes the entire agreement between the parties with respect to
+      its subject matter and supersedes all prior agreements, understandings and
+      representations, whether written or oral.
+  - id: counterparts
+    title: Counterparts
+    text: >-
+      This Agreement may be executed in any number of counterparts, each of which shall be
+      deemed an original and all of which together shall constitute one instrument.
+  - id: severability
+    title: Severability
+    text: >-
+      If any provision of this Agreement is held invalid or unenforceable, the remaining
+      provisions shall continue in full force and effect.
+  - id: notices
+    title: Notices
+    text: >-
+      All notices under this Agreement shall be in writing and delivered by hand, by courier
+      or by email to the addresses set out above, and are effective on receipt.
+  - id: waiver
+    title: Waiver
+    text: >-
+      No failure or delay by either party in exercising any right under this Agreement shall
+      operate as a waiver of that right.
+  - id: headings
+    title: Headings
+    text: >-
+      Headings are for convenience only and do not affect the interpretation of this Agreement.

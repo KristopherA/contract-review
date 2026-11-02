@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+*.zip
+.DS_Store
+# never commit real contracts or generated reports
+private/
+reports/
+*.report.md

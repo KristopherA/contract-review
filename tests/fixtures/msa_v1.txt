@@ -1,0 +1,30 @@
+MASTER SERVICES AGREEMENT
+
+This Master Services Agreement is made as of January 15, 2025 by and between Example Corp, a fictional company ("Customer"), and Sample Services Ltd ("Supplier").
+
+1. Definitions
+"Services" means the hosting services described in Schedule A. "Fees" means the amounts payable under Section 4.
+
+2. Term and Renewal
+This Agreement starts on the Effective Date and continues for an initial term of twelve (12) months. It renews automatically for successive one-year terms unless either party gives sixty (60) days written notice of non-renewal.
+
+3. Services
+Supplier shall provide the Services with reasonable skill and care and shall meet the service levels in Schedule B.
+
+4. Fees and Payment
+Customer shall pay a monthly fee of $5,000 USD. Invoices are payable within thirty (30) days. Late amounts bear interest at 1.5% per month.
+
+5. Confidentiality
+Each party shall keep the other party's confidential information secret and use it only to perform this Agreement, for three (3) years after termination.
+
+6. Limitation of Liability
+Neither party is liable for indirect or consequential loss. Each party's total liability is capped at the fees paid in the twelve (12) months before the claim.
+
+7. Termination
+Either party may terminate this Agreement for material breach not cured within thirty (30) days of written notice.
+
+8. Entire Agreement
+This Agreement constitutes the entire agreement between the parties with respect to its subject matter and supersedes all prior agreements, understandings and representations, whether written or oral.
+
+9. Counterparts
+This Agreement may be executed in any number of counterparts, each of which shall be deemed an original and all of which together shall constitute one instrument.

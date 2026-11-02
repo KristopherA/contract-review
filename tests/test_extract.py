@@ -176,9 +176,66 @@ def test_page_count_falls_back_to_pypdf(pdf_factory, monkeypatch):
 def test_monkeypatched_pdfinfo_count_blocks_pdftotext(pdf_factory, monkeypatch):
     p = pdf_factory("fake.pdf", LINES)
     monkeypatch.setattr(ex, "_page_count_pdfinfo", lambda _p, _t: 600)
+    monkeypatch.setattr(ex, "_page_count_pypdf", lambda _p: 600)
     with pytest.raises(ExtractionError, match="limit is 500"):
         extract_text(p, "pdftotext")
 
 
 def test_defusedxml_in_use():
     assert ex._SAFE_ET is not None
+
+
+# --- draft 4: page-count cross-check and loud pdftotext truncation ---------------
+def _crafted_pdf(path, real, claimed):
+    from pypdf import PdfWriter
+    from pypdf.generic import NameObject, NumberObject
+    w = PdfWriter()
+    for _ in range(real):
+        w.add_blank_page(width=200, height=200)
+    w._root_object["/Pages"][NameObject("/Count")] = NumberObject(claimed)
+    with open(path, "wb") as fh:
+        w.write(fh)
+    return path
+
+
+@pytest.mark.skipif(not shutil.which("pdfinfo"), reason="pdfinfo not installed")
+def test_understated_count_is_refused(tmp_path):
+    p = _crafted_pdf(tmp_path / "hidden.pdf", real=12, claimed=3)
+    assert ex._page_count_pdfinfo(p, 10) == 3 and ex._page_count_pypdf(p) == 12
+    for backend in ("auto", "pdftotext", "pypdf"):
+        with pytest.raises(ExtractionError, match="page counts disagree"):
+            extract_text(p, backend)
+
+
+def test_count_disagreement_monkeypatched(pdf_factory, monkeypatch):
+    p = pdf_factory("dis.pdf", LINES)
+    monkeypatch.setattr(ex, "_page_count_pdfinfo", lambda _p, _t: 10)
+    with pytest.raises(ExtractionError, match="pdfinfo 10, page tree 1"):
+        extract_text(p, "auto")
+
+
+def test_cross_check_skipped_without_pypdf(pdf_factory, monkeypatch):
+    p = pdf_factory("nopypdf.pdf", LINES)
+    monkeypatch.setattr(ex, "_pypdf_available", lambda: False)
+    monkeypatch.setattr(ex, "_page_count_pdfinfo", lambda _p, _t: 7)
+    assert ex.pdf_page_count(p) == 7
+    monkeypatch.setattr(ex, "_page_count_pdfinfo", lambda _p, _t: None)
+    with pytest.raises(ExtractionError, match="neither"):
+        ex.pdf_page_count(p)
+
+
+def test_pdftotext_short_output_is_an_error_not_partial_text(pdf_factory, monkeypatch):
+    p = pdf_factory("short.pdf", LINES)
+    monkeypatch.setattr(ex.shutil, "which", lambda _: "/usr/bin/" + _)
+    monkeypatch.setattr(ex, "pdf_page_count", lambda _p, _t=None: 3)
+    monkeypatch.setattr(ex.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, "page one\fpage two\f", ""))
+    for backend in ("auto", "pdftotext"):
+        with pytest.raises(ex.PageMismatchError, match="returned 2 pages but the PDF has 3"):
+            extract_text(p, backend)
+
+
+@pytest.mark.skipif(not shutil.which("pdftotext"), reason="pdftotext not installed")
+def test_pdftotext_real_page_count_matches(pdf_factory):
+    p = pdf_factory("ok.pdf", LINES)
+    assert "Scope" in extract_text(p, "pdftotext")

@@ -117,13 +117,22 @@ def test_role_swap_does_not_fold():
     NOTICES.upper(),
     NOTICES.replace(",", "").replace(".", ";"),
     "  " + NOTICES.replace(" ", "\n  ") + "\n",
-    NOTICES.replace("All notices", "All the notices"),
+    NOTICES.replace("All notices", "All notices hereby"),
 ])
 def test_case_punctuation_whitespace_still_fold(variant):
     assert bp.match(variant, "Notices", LIB)[0] == "notices"
 
 
 def test_filler_list_has_no_meaning_words():
-    for w in ("and", "or", "nor", "any", "all", "each", "every", "either", "neither", "both",
+    assert bp.FILLER == {"hereby"}
+    for w in ("the", "a", "an", "and", "or", "nor", "any", "all", "each", "every", "either", "neither", "both",
               "may", "must", "will", "shall", "not", "of", "to", "by", "this", "that", "its", "their"):
         assert w not in bp.FILLER
+
+
+@pytest.mark.parametrize("variant", [
+    NOTICES.replace("All notices", "All the notices"),
+    EA.replace("This Agreement", "The Agreement") if "This Agreement" in EA else EA.replace("the ", "a ", 1),
+])
+def test_article_changes_do_not_fold(variant):
+    assert bp.match(variant, "", LIB) is None

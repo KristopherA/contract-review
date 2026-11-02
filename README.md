@@ -100,13 +100,18 @@ Edit `assets/boilerplate.yaml`. Each clause needs `id` and `text`; `threshold`
 file and `--no-fold` to keep everything. The default threshold is 95, and a
 section is never folded if its numbers, negation/exception words or content words
 differ from the library text, so "does not constitute" or "except Schedule 3" stays
-visible for review.
+visible for review. Words are compared in order and only "hereby" is ignored, so even
+"a" vs "the" or "or" vs "and" keeps the section in the outline; only case, punctuation
+and whitespace differences fold.
 
 ### Limits
 
 DOCX parts over 20 MB uncompressed or with a compression ratio over 100, DOCX files
 with DOCTYPE/ENTITY declarations, PDFs over 50 MB or 500 pages are refused with a
-clean `error:` message (exit 2). Page counts are checked first (pdfinfo, else pypdf), so
+clean `error:` message (exit 2). Page counts are checked first with pdfinfo and pypdf
+(which walks the real page tree); if they disagree, or pdftotext's output has a different
+number of pages, the file is refused. If pypdf is not installed this cross-check is
+skipped and only pdfinfo's count (from the file's /Count entry) is used, so
 long PDFs are refused, never truncated. pdftotext has a 120 s timeout and falls back to
 pypdf. DOCX XML is parsed with defusedxml (DTDs forbidden).
 

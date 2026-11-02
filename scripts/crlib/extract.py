@@ -28,7 +28,11 @@ class ExtractionError(RuntimeError):
     pass
 
 
-def _pdf_pdftotext(path: Path, timeout: float) -> str:
+class PageMismatchError(ExtractionError):
+    """Extractor output does not cover every page. Never fall back past this."""
+
+
+def _pdf_pdftotext(path: Path, timeout: float, expected_pages: int | None = None) -> str:
     exe = shutil.which("pdftotext")
     if not exe:
         raise ExtractionError("pdftotext not found")
@@ -41,6 +45,10 @@ def _pdf_pdftotext(path: Path, timeout: float) -> str:
         raise ExtractionError(f"pdftotext could not run: {exc}") from exc
     if res.returncode != 0:
         raise ExtractionError(f"pdftotext failed: {res.stderr.strip()[:300]}")
+    got = res.stdout.count("\f")  # pdftotext ends every page with a form feed
+    if expected_pages is not None and got != expected_pages:
+        raise PageMismatchError(f"pdftotext returned {got} pages but the PDF has {expected_pages}; "
+                              "refusing partial text")
     return res.stdout
 
 
@@ -56,6 +64,14 @@ def _page_count_pdfinfo(path: Path, timeout: float) -> int | None:
     return int(m[1]) if m else None
 
 
+def _pypdf_available() -> bool:
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _page_count_pypdf(path: Path) -> int:
     try:
         from pypdf import PdfReader
@@ -68,9 +84,21 @@ def _page_count_pypdf(path: Path) -> int:
 
 
 def pdf_page_count(path: Path, timeout: float = PDFTOTEXT_TIMEOUT) -> int:
-    """pdfinfo first, pypdf as the fallback. Never silently truncate."""
+    """Count pages with pdfinfo and (when installed) pypdf; refuse if they disagree.
+
+    pdfinfo trusts the /Count entry, which a crafted file can understate to hide
+    pages; pypdf walks the real page tree. Without pypdf the cross-check is skipped.
+    """
     n = _page_count_pdfinfo(path, timeout)
-    return n if n is not None else _page_count_pypdf(path)
+    if not _pypdf_available():
+        if n is None:
+            raise ExtractionError("cannot count PDF pages: neither pdfinfo nor pypdf is available")
+        return n
+    m = _page_count_pypdf(path)
+    if n is not None and n != m:
+        raise ExtractionError(f"{path.name}: page counts disagree (pdfinfo {n}, page tree {m}); "
+                              "the PDF may be crafted to hide pages")
+    return m
 
 
 def _pdf_pypdf(path: Path) -> str:
@@ -98,9 +126,11 @@ def extract_pdf(path: Path, backend: str = "auto", timeout: float = PDFTOTEXT_TI
                               "(split the PDF; nothing is truncated silently)")
     if backend in ("auto", "pdftotext"):
         try:
-            text = _pdf_pdftotext(path, timeout)
+            text = _pdf_pdftotext(path, timeout, pages)
             if text.strip() or backend == "pdftotext":
                 return text
+        except PageMismatchError:
+            raise
         except ExtractionError:
             if backend == "pdftotext":
                 raise

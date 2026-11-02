@@ -6,9 +6,9 @@ folds only if, compared with the library clause:
   * similarity (numbers kept) >= threshold (default 95), and
   * the sets of numbers/amounts are identical, and
   * the sets of negation/exception words are identical, and
-  * the word sequences, compared in order with only articles ("the", "a",
-    "an") and "hereby" ignored, are identical. So only whitespace, punctuation,
-    case and those words may differ; "or"->"and", "all"->"any" or swapping who
+  * the word sequences, compared in order with only "hereby" ignored, are
+    identical. So only whitespace, punctuation, case and "hereby" may differ
+    ("a" -> "the" does not fold); "or"->"and", "all"->"any" or swapping who
     does what ("A indemnifies B" vs "B indemnifies A") never folds.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ NEGATION_EXCEPTION = ("shall not", "must not", "may not", "will not", "does not"
 # Deliberately tiny. Quantifiers (all, any, each, every, either, neither, both),
 # connectives (and, or, nor), modals (may, must, will, shall), prepositions and
 # pronouns/determiners (this, that, its, their, such) all carry meaning.
-FILLER = frozenset({"the", "a", "an", "hereby"})
+FILLER = frozenset({"hereby"})
 
 
 def numbers(text: str) -> frozenset:

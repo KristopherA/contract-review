@@ -18,7 +18,8 @@
 (default 95) or `--threshold`; per-clause `threshold` overrides. A section folds only
 if, in addition, its numbers/amounts, its negation/exception words (not, no, never,
 except, unless, notwithstanding, shall not, provided that, subject to, ...) and its
-content words all match the library clause exactly. Anything else stays in the outline.
+content words all match the library clause exactly, in order (only "hereby" is ignored;
+"a" -> "the" does not fold). Anything else stays in the outline.
 
 ## diff
 Array of changes `{id, kinds[], old, new, score, word_diff[]}`. `word_diff` ops are
@@ -37,7 +38,8 @@ inside `split_into[]`/`merged_from[]` of the section that absorbed them.
 
 ## Limits
 Input files: DOCX `word/document.xml` ≤ 20 MB uncompressed and compression ratio ≤ 100
-(read in bounded chunks; DOCTYPE/ENTITY rejected, then parsed with defusedxml); PDF ≤ 50 MB and ≤ 500 pages (counted up front with pdfinfo, or pypdf as the fallback,
+(read in bounded chunks; DOCTYPE/ENTITY rejected, then parsed with defusedxml); PDF ≤ 50 MB and ≤ 500 pages (counted up front with pdfinfo and pypdf; disagreement, or pdftotext returning a
+different number of form-feed pages, is an error. Without pypdf only pdfinfo is used,
 so longer files are refused rather than truncated);
 pdftotext timeout 120 s (then falls back to pypdf in `auto`). Errors print
 `error: ...` and exit 2.

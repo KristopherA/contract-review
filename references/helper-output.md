@@ -15,13 +15,27 @@
 ## outline
 `sections[]` = section + `cite`, `topic_hints[]`, `dates[]`, `amounts[]`, `durations[]`.
 `boilerplate_folded[]` = `{section, id, clause, score}`. Threshold: library `threshold`
-(default 85) or `--threshold`; per-clause `threshold` overrides.
+(default 95) or `--threshold`; per-clause `threshold` overrides. A section folds only
+if, in addition, its numbers/amounts, its negation/exception words (not, no, never,
+except, unless, notwithstanding, shall not, provided that, subject to, ...) and its
+content words all match the library clause exactly. Anything else stays in the outline.
 
 ## diff
 Array of changes `{id, kinds[], old, new, score, word_diff[]}`. `word_diff` ops are
 `{op: equal|delete|insert, text}`. Alignment score = 0.35 × title similarity +
 0.65 × content similarity (0-100); pairs below `--match-threshold` (default 55) are
 reported as removed + added. `moved` means the relative order changed.
+A pair with a rewritten title still matches when content similarity alone is ≥ 65.
+`split` (with `split_into[]`) = one old section became this one plus neighbours;
+`merged` (with `merged_from[]`) = several old sections became this one. Accepted only
+when the combined text is ≥ 80 similar and ≥ 10 points better than the single pair;
+`word_diff` then runs over the concatenated text.
+
+## Limits
+Input files: DOCX `word/document.xml` ≤ 20 MB uncompressed and compression ratio ≤ 100
+(read in bounded chunks; DOCTYPE/ENTITY rejected); PDF ≤ 50 MB and ≤ 500 pages;
+pdftotext timeout 120 s (then falls back to pypdf in `auto`). Errors print
+`error: ...` and exit 2.
 
 ## evolve
 `{query, timeline[]}`; each entry `{version, index, present, status, section?,

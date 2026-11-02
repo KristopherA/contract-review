@@ -1,21 +1,17 @@
 ---
 name: contract-review
 description: Outline a contract (parties, dates, term, termination, money, liability, confidentiality, unusual terms) with clause citations, diff two versions with aligned sections and plain one-line summaries, or trace one clause across versions. Use for PDF, DOCX or text contracts. Runs offline; not legal advice.
-version: 0.1.0
 license: MIT
-compatibility: Hermes Agent with the terminal toolset, Python 3.10+, local Ollama model (64k context). Optional poppler pdftotext. No network access needed.
-platforms: [macos, linux]
+compatibility: Hermes Agent with the terminal toolset on macOS or Linux, Python 3.10+, local Ollama model (64k context). Optional poppler pdftotext. No network access needed.
 metadata:
+  version: "0.1.0"
   author: KristopherA
-  hermes:
-    tags: [contracts, legal, diff, documents, offline]
-    category: productivity
-    requires_toolsets: [terminal]
-    config:
-      - key: contract_review.library
-        description: Path to your boilerplate clause library (YAML)
-        default: "~/.hermes/skills/contract-review/assets/boilerplate.yaml"
-        prompt: Boilerplate library path
+  hermes-tags: "contracts, legal, diff, documents, offline"
+  hermes-category: productivity
+  hermes-platforms: "macos, linux"
+  hermes-requires-toolsets: terminal
+  library-default: "assets/boilerplate.yaml (override with --library PATH)"
+allowed-tools: terminal
 ---
 
 # Contract Review

@@ -1,7 +1,7 @@
 # User-editable library of standard clauses. Sections whose text matches one of
-# these at or above `threshold` (0-100, rapidfuzz ratio on normalised text) are
+# these at or above `threshold` (0-100) AND have the same numbers, negation/exception words and content words are
 # folded away in outlines. Add your own; a per-clause `threshold` overrides.
-threshold: 85
+threshold: 95
 clauses:
   - id: entire-agreement
     title: Entire Agreement

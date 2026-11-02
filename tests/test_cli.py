@@ -35,3 +35,21 @@ def test_helpers_have_no_network_code():
     banned = re.compile(r"^\s*(import|from)\s+(socket|urllib|http|requests|httpx|aiohttp|ftplib|smtplib)\b", re.M)
     for p in (ROOT / "scripts").rglob("*.py"):
         assert not banned.search(p.read_text()), p
+
+
+def test_cli_clean_errors(tmp_path, fixtures):
+    import zipfile
+    bad = tmp_path / "corrupt.docx"
+    with zipfile.ZipFile(bad, "w") as z:
+        z.writestr("word/document.xml", "<w:document><unclosed>")
+    rc, out, err = run("outline", bad)
+    assert rc == 2 and err.startswith("error:") and "Traceback" not in err
+    y = tmp_path / "bad.yaml"; y.write_text("clauses: [\n  - id: x\n")
+    rc, _, err = run("outline", fixtures / "msa_v1.txt", "--library", y)
+    assert rc == 2 and "invalid YAML" in err and "Traceback" not in err
+    pdf = tmp_path / "bad.pdf"; pdf.write_bytes(b"%PDF-1.4 garbage")
+    rc, _, err = run("--pdf-backend", "pypdf", "sections", pdf)
+    assert rc == 2 and "Traceback" not in err
+    j = tmp_path / "s.json"; j.write_text("{not json")
+    rc, _, err = run("diff", fixtures / "msa_v1.txt", fixtures / "msa_v2.txt", "--format", "md", "--summaries", j)
+    assert rc == 2 and "Traceback" not in err

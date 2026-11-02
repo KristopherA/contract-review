@@ -1,6 +1,18 @@
-"""Match sections against a user-editable library of standard clauses."""
+"""Match sections against a user-editable library of standard clauses.
+
+Folding hides text, so a fold must be safe: fuzzy similarity alone is not
+enough (a single "not" or a changed amount barely moves the ratio). A section
+folds only if, compared with the library clause:
+  * similarity (numbers kept) >= threshold (default 95), and
+  * the sets of numbers/amounts are identical, and
+  * the sets of negation/exception words are identical, and
+  * no content words were added or dropped (only whitespace, punctuation,
+    case or a small list of filler words may differ).
+"""
 from __future__ import annotations
 
+import re
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -8,25 +20,78 @@ import yaml
 from .similarity import ratio
 
 DEFAULT_LIBRARY = Path(__file__).resolve().parents[2] / "assets" / "boilerplate.yaml"
-DEFAULT_THRESHOLD = 85.0
+DEFAULT_THRESHOLD = 95.0
+
+NUMBER = re.compile(r"[$€£]?\d[\d,]*(?:\.\d+)?%?")
+WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
+NEGATION_EXCEPTION = ("shall not", "must not", "may not", "will not", "does not", "do not",
+                      "provided that", "subject to", "not", "no", "never", "none", "nor",
+                      "without", "except", "excluding", "unless", "notwithstanding", "save",
+                      "only", "cannot")
+FILLER = {"the", "a", "an", "this", "that", "these", "those", "its", "their", "such",
+          "hereby", "herein", "hereof", "hereunder", "and", "or", "of", "to", "in", "by", "any", "all"}
+
+
+def numbers(text: str) -> frozenset:
+    return frozenset(n.replace(",", "").rstrip(".") for n in NUMBER.findall(text))
+
+
+def guard_words(text: str) -> frozenset:
+    t = " " + re.sub(r"[^a-z]+", " ", text.lower()) + " "
+    found = set()
+    for w in NEGATION_EXCEPTION:  # multi-word phrases first, then consume them
+        if f" {w} " in t:
+            found.add(w)
+            t = t.replace(f" {w} ", " ")
+    return frozenset(found)
+
+
+def content_delta(a: str, b: str) -> Counter:
+    ca = Counter(w for w in WORD.findall(a.lower()) if w not in FILLER)
+    cb = Counter(w for w in WORD.findall(b.lower()) if w not in FILLER)
+    return (ca - cb) + (cb - ca)
+
+
+def safe_to_fold(section_text: str, clause_text: str) -> tuple[bool, str]:
+    if numbers(section_text) != numbers(clause_text):
+        return False, "numbers or amounts differ"
+    if guard_words(section_text) != guard_words(clause_text):
+        return False, "negation or exception wording differs"
+    delta = content_delta(section_text, clause_text)
+    if delta:
+        return False, "content words added or dropped: " + ", ".join(sorted(delta)[:8])
+    return True, ""
 
 
 def load_library(path: str | Path | None = None) -> dict:
-    path = Path(path) if path else DEFAULT_LIBRARY
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    path = Path(path).expanduser() if path else DEFAULT_LIBRARY
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path.name}: invalid YAML ({exc.__class__.__name__}: {str(exc).splitlines()[0]})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{path.name}: top level must be a mapping with 'clauses'")
     clauses = data.get("clauses") or []
+    if not isinstance(clauses, list):
+        raise ValueError(f"{path.name}: 'clauses' must be a list")
     for c in clauses:
-        if not c.get("id") or not c.get("text"):
-            raise ValueError(f"{path}: every clause needs id and text")
-    return {"threshold": float(data.get("threshold", DEFAULT_THRESHOLD)), "clauses": clauses}
+        if not isinstance(c, dict) or not c.get("id") or not isinstance(c.get("text"), str):
+            raise ValueError(f"{path.name}: every clause needs id and text")
+    try:
+        thr = float(data.get("threshold", DEFAULT_THRESHOLD))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path.name}: threshold must be a number") from exc
+    return {"threshold": thr, "clauses": clauses}
 
 
 def match(section_text: str, title: str, library: dict, threshold: float | None = None):
-    """Return (clause_id, score) of best match at/above threshold, else None."""
+    """Return (clause_id, score) of the best safe match at/above threshold, else None."""
     best = None
     for c in library["clauses"]:
         thr = float(c.get("threshold", threshold if threshold is not None else library["threshold"]))
-        score = ratio(section_text, c["text"])
-        if score >= thr and (best is None or score > best[1]):
+        score = ratio(section_text, c["text"], keep_numbers=True)
+        if score < thr or not safe_to_fold(section_text, c["text"])[0]:
+            continue
+        if best is None or score > best[1]:
             best = (c["id"], round(score, 1))
     return best

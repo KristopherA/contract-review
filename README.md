@@ -97,7 +97,16 @@ Reports are Markdown and open in any Markdown viewer.
 
 Edit `assets/boilerplate.yaml`. Each clause needs `id` and `text`; `threshold`
 (0-100) is global with optional per-clause overrides. Use `--library` for another
-file and `--no-fold` to keep everything.
+file and `--no-fold` to keep everything. The default threshold is 95, and a
+section is never folded if its numbers, negation/exception words or content words
+differ from the library text, so "does not constitute" or "except Schedule 3" stays
+visible for review.
+
+### Limits
+
+DOCX parts over 20 MB uncompressed or with a compression ratio over 100, DOCX files
+with DOCTYPE/ENTITY declarations, PDFs over 50 MB or 500 pages are refused with a
+clean `error:` message (exit 2). pdftotext has a 120 s timeout and falls back to pypdf.
 
 ## Development
 

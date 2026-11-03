@@ -120,12 +120,15 @@ CLAUSE_LABEL = re.compile(r"(\A|\n[ \t]*\n)[ \t]*\(?(\d{1,3}(?:\.\d{1,3}){1,4})\
 def strip_labels(text: str, number: str = "") -> str:
     """Strip clause labels that follow the section's own numbering and go up in order.
     With a numeric section number (Article 12) the labels must be 12.xx. With none
-    (appendix, LOU, unnumbered) the first label sets the numbering and must end in
-    .01 or .1; otherwise nothing is stripped."""
+    (appendix, LOU) the first label must be 1.01 or 1.1 (draft 15: '30.01' or '2.1' strips
+    nothing). With no number at all, the first label must end in .01 or .1. Otherwise
+    nothing is stripped."""
     major = number.split(".")[0] if number and number[0].isdigit() else None
     if major is None:
         first = CLAUSE_LABEL.search(text)
-        if not first or first[2].split(".")[-1] not in ("01", "1"):
+        ok = (first[2] in ("1.01", "1.1") if number  # appendix/LOU: its own numbering starts at 1
+              else first[2].split(".")[-1] in ("01", "1")) if first else False  # no number given
+        if not ok:
             return text
     last: list[tuple[int, ...]] = []
 

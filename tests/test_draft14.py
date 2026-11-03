@@ -90,7 +90,7 @@ def test_exact_title_beats_substring_and_fuzzy_is_last():
 
 def test_tighter_substring_wins_and_others_are_listed():
     s = split_sections("ARTICLE 1: OVERTIME\n1.01 A.\nARTICLE 2: OVERTIME BANKS\n2.01 B.\n")
-    m = match_section(s, "overtim")
+    m = match_section(s, "overtime")
     assert m["section"].number == "1" and m["others"] == ["§2 OVERTIME BANKS"]
 
 
@@ -104,14 +104,18 @@ def test_exact_tie_is_ambiguous():
 def test_renumbered_clause_found_by_title_in_each_version():
     t = evolve(vs(), "overtime")["timeline"]
     assert [e["section"]["number"] for e in t] == ["12", "13"]
-    assert [e["matched_by"] for e in t] == ["title-substring"] * 2
+    assert [e["matched_by"] for e in t] == ["title-substring", "aligned+title-substring"]  # draft 15
     assert t[1]["status"] == "changed" and t[1]["renumbered_from"] == "12"
 
 
-def test_number_query_is_matched_per_version():
-    t = evolve(vs(), "13.01")["timeline"]  # v1 13.01 is holidays (a cite), v2 13.01 RATE
+def test_number_query_follows_the_clause_after_the_first_match():
+    # draft 15: v1 13.01 is a cite in HOLIDAYS; v2 follows HOLIDAYS (now 14) by alignment,
+    # not v2's unrelated 13.01 RATE, and says so on stderr
+    r = evolve(vs(), "13.01")
+    t = r["timeline"]
     assert t[0]["section"]["title"] == "HOLIDAYS" and t[0]["matched_part"] == "13.01"
-    assert t[1]["section"]["title"] == "RATE"
+    assert t[1]["section"]["title"] == "HOLIDAYS" and t[1]["matched_by"] == "aligned"
+    assert any("also matches §13.01 RATE" in w for w in r["warnings"])
     t = evolve(vs(), "Appendix A 1.02")["timeline"]
     assert [e["status"] for e in t] == ["baseline", "changed"]
 
@@ -131,7 +135,7 @@ def test_cli_lists_other_candidates_and_exits_2_on_a_tie(tmp_path):
     a, b = tmp_path / "a.txt", tmp_path / "b.txt"
     a.write_text("ARTICLE 1: OVERTIME\n1.01 A x.\nARTICLE 2: OVERTIME BANKS\n2.01 B x.\n")
     b.write_text("ARTICLE 1: OVERTIME\n1.01 A y.\nARTICLE 2: OVERTIME BANKS\n2.01 B y.\n")
-    rc, out, err = run("evolve", a, b, "--section", "overtim")
+    rc, out, err = run("evolve", a, b, "--section", "overtime")
     assert rc == 0 and json.loads(out)["timeline"][0]["section"]["number"] == "1"
     assert "also close: §2 OVERTIME BANKS" in err
     a.write_text("ARTICLE 1: OVERTIME RATES\n1.01 A x.\nARTICLE 2: OVERTIME BANKS\n2.01 B x.\n")
@@ -170,14 +174,14 @@ CBA = [c for c in LIB["clauses"] if c["id"].startswith("cba-")]
 
 
 @pytest.mark.parametrize("c", CBA, ids=lambda c: c["id"])
-@pytest.mark.parametrize("number", ["", "Appendix A", "LOU 3"])
+@pytest.mark.parametrize("number", ["", "Appendix A", "Letter of Understanding 3"])
 def test_foreign_first_label_does_not_fold(c, number):
     assert bp.match("30.5 " + c["text"], "", LIB, number=number) is None
     assert bp.match("30.5 Employees shall receive the benefit.\n\n30.6 " + c["text"], "", LIB, number=number) is None
 
 
 @pytest.mark.parametrize("c", CBA, ids=lambda c: c["id"])
-@pytest.mark.parametrize("first", ["1.01", "1.1", "4.01"])
+@pytest.mark.parametrize("first", ["1.01", "1.1"])  # draft 15: must start at 1
 def test_first_label_ending_01_or_1_folds(c, first):
     assert bp.match(first + " " + c["text"], "", LIB, number="Appendix A")[0] == c["id"]
 

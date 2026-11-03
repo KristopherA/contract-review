@@ -34,7 +34,8 @@ NOTE = "> _Generated locally by contract-review. Not legal advice; verify agains
 def _lbl(s):
     if not s:
         return "—"
-    return f"{cite(s['number'])} {s['title']}".strip() if s["number"] else (s["title"] or s["id"])
+    t = md_escape(s["title"]) if s["title"] else ""
+    return f"{cite(s['number'])} {t}".strip() if s["number"] else (t or s["id"])
 
 
 def diff_markdown(changes, old_name, new_name, summaries=None) -> str:

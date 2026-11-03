@@ -22,7 +22,9 @@ per sentence; a sentence over 2000 chars is scanned in 2000-char windows overlap
 prevent…" saving clauses are not listed as obligations. A sentence with `shall not / must not / may not / will not / cannot` is a
 prohibition, as is `No X / Nothing / Neither … shall` ("No employee shall be
 disciplined"). `who` is the last noun phrase before the modal, without leading
-cross-references ("See Art. 5."); sentences never split after i.e., e.g., Art., No. or s.
+cross-references ("See Art. 5.", "Pursuant to s. 12 of the Act …") and trailing
+"i.e./e.g." asides; sentences never split after i.e., e.g., Art., No., s., Mr., Ms., Dr.
+or Sec.
 `--summaries FILE` (JSON `{section id: string}`, max 1 MB) adds a
 `**Summary:**` line per section in Markdown; off by default. Values are collapsed to
 one line, capped at 2000 chars and Markdown-escaped (including `&`; URLs and emails
@@ -33,18 +35,23 @@ annexes (`LETTER OF UNDERSTANDING`, `APPENDIX A`, `SCHEDULE 1`, memorandum, adde
 annex) which start their own top-level block; an untitled annex takes its title from a
 `Re:` line. Clause numbers inside an annex are scoped to it (`Appendix A 1.01`, cited
 `Appendix A, §1.01`), so a repeated `1.01` is not a duplicate; a `1. TITLE` line inside
-an annex is a clause of that annex (`Schedule C 1`), never a document article, unless it continues the main article sequence (`3.`
-after Article 2), which resumes the body. TOC entries (dot
+an annex is a clause of that annex (`Schedule C 1`), never a document article. The body resumes only on an `ARTICLE N` heading, a new annex
+heading, or an `N.` the table of contents lists as a main article that does not continue
+the schedule's own items. Limit: a `1. TITLE` document without a TOC keeps every `N.`
+after its first schedule inside that schedule. TOC entries (dot
 leaders, trailing page numbers, a CONTENTS/INDEX block) and `(a)`/`(i)`/`1.` list
 items stay out. Page furniture is dropped: `- N -` and `Page N of M` lines; bare
 numbers at the top/bottom of pages that equal the page index plus a small offset (≤6)
-on 3+ pages (explicit forms count toward the run); and running headers/footers. A line identical (except for the page number) in the same
-edge slot on at least 80% of the pages (minimum 4) is always dropped. Below that, a repeat
-on 3+ pages and at least half of the pages is dropped even with `$`, `%` or a modal verb,
-unless it is a heading or a bottom-edge line that ends with sentence punctuation or cites
-Article/Section/Clause N (`Subject to Article 12.` on 3 of 5 pages is kept at the bottom,
-dropped at the top). Minority repeats (3+ pages) are dropped unless they carry `$`, `%`,
-shall/must/may/will/agree, or are such a bottom-edge sentence/citation line. Kept: a bare number inside a page (`1500`)
+on 3+ pages (explicit forms count toward the run); and running headers/footers. Lines that look like headings (`ARTICLE 3`, `1. TITLE`) are
+never dropped. A line identical (except for the page number) in the same edge slot on at
+least 80% of the pages (minimum 4) is dropped, except a bottom-edge full sentence with a
+modal verb or `$` that is missing from at least one page; a line on every page, or at the
+top, always goes. Below 80%, a repeat on 3+ pages and at least half of the pages is
+dropped even with `$`, `%` or a modal verb, unless it is a bottom-edge line that ends with
+sentence punctuation or cites Article/Section/Clause N (`Subject to Article 12.` on 3 of 5
+pages is kept at the bottom, dropped at the top). Minority repeats (3+ pages) are dropped
+unless they carry `$`, `%`, shall/must/may/will/agree, or are such a bottom-edge line.
+The cases are pinned in `tests/layout_cases.py`. Kept: a bare number inside a page (`1500`)
 and edge numbers that don't track the page. Annex ids may be quoted (`SCHEDULE "B" - BENEFITS`); an
 upper-case line right under an untitled annex (`APPENDIX A` / `WAGE GRID`) is its title.
 A clause "title" containing `$` or `%` is treated as body, so wage rows keep amounts.

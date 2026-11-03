@@ -49,6 +49,7 @@ ALWAYS_SHARE = 0.8
 # ...and at least this many pages: in a 2-3 page file "identical on every page" is weak
 # evidence (a clause per page can repeat), so those fall back to the majority rule
 ALWAYS_MIN = 4
+SENT_END = re.compile(r"[.;?!][\"'\u201d)]?$")
 # a bottom-edge line repeated on fewer pages that ends like a sentence or cites a clause is body text
 KEEP_LINE = re.compile(r"[.;:?!][\"'\u201d)]?$|\b(?:article|section|clause)\s+\d", re.I)
 BODY_MARK = re.compile(r"[$%€£]|\b(?:shall|must|may|will|agrees?)\b", re.I)
@@ -249,7 +250,9 @@ def _clean_lines(text: str) -> list[str]:
     1. Running headers/footers: an edge line (one of the first/last EDGE non-empty lines)
        identical, except for the page-number position, in the same edge slot on >=3 pages
        and on at least ALWAYS_SHARE (80%) of the pages, minimum ALWAYS_MIN (4) pages, is
-       always dropped. Below that, a
+       dropped, except a bottom-edge full sentence with a modal verb or $ that is missing
+       from at least one page (an every-page line, or any top-edge line, always goes).
+       Lines _classify calls headings are never dropped. Below 80%, a
        repeat on >=3 pages and at least half the pages is dropped even with modal words or
        $, unless it is a heading or a bottom-edge line that ends like a sentence (. ; : ? !)
        or cites Article/Section/Clause N (so 3 of 5 pages: kept at the bottom, dropped at
@@ -290,11 +293,17 @@ def _clean_lines(text: str) -> list[str]:
             best = max(where[k] for k in keys)
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
-            if best >= always:
-                drop.add((p, i)); continue  # same slot on (nearly) every page: always furniture
+            if _classify(t):
+                continue  # a heading is never furniture ("ARTICLE 1", "ARTICLE 2" at page tops)
             top = (p, i) not in bottom  # on a short page a line can sit in both edges
-            if _classify(t) or (not top and KEEP_LINE.search(t)):
-                continue  # a heading, or a bottom-edge "Subject to Article 12." on some pages
+            if best >= always:
+                # same slot on (nearly) every page: furniture, except a bottom-edge full
+                # sentence with a modal or $ that is missing from at least one page
+                if top or best >= n_pages or not (SENT_END.search(t) and BODY_MARK.search(t)):
+                    drop.add((p, i))
+                continue
+            if not top and KEEP_LINE.search(t):
+                continue  # a bottom-edge "Subject to Article 12." on some pages
             if best >= need and best * 2 >= n_pages:
                 drop.add((p, i))  # running header/footer on most pages
             elif best >= 3 and not BODY_MARK.search(t):
@@ -368,6 +377,8 @@ def split_sections(text: str) -> list[Section]:
     target = None  # heading dict that receives body lines
     block, block_is_annex = "", False
     last_main = 0  # last main-body article number (outside annexes)
+    annex_item = 0  # last "N." item number inside the current annex
+    toc_main: set[str] = set()  # top-level "N." numbers listed in the TOC
     in_annex = False  # inside an appendix / schedule / letter block
     seen_annex: dict[str, int] = {}  # current top-level block (article or annex)
     style_kw = sum(1 for ln in lines if re.match(rf"^{KW}\s+(\d+|[IVXLC]+)\b", ln, re.I)) >= 2
@@ -386,12 +397,18 @@ def split_sections(text: str) -> list[Section]:
             c = _classify(_toc_key(line))
             if c:
                 toc_numbers.add(c[1])
+                if c[0] == "top":
+                    toc_main.add(c[1])
             i += 1; continue
         c = _classify(line)
-        if c and c[0] == "top" and in_annex and not in_toc and last_main and c[2] == last_main + 1 \
-                and not style_kw:
-            in_annex = False; last_top = last_main  # "3. TITLE" after Article 2's annex: body resumes
+        if c and c[0] == "top" and in_annex and not in_toc and not style_kw and c[1] in toc_main \
+                and c[2] != annex_item + 1:
+            # the TOC lists "3." as a main article and it does not continue the schedule's
+            # own items: the body resumes. Without a TOC (or an ARTICLE keyword / new annex
+            # heading) every "N." after a schedule stays in that schedule.
+            in_annex = False; last_top = last_main
         if c and c[0] == "top" and in_annex and not in_toc:
+            annex_item = c[2]
             # "1. DENTAL" inside Schedule C is a clause of that schedule, never a document
             # article: number and dedupe it within the annex block.
             c = ("clause", c[1], 0, c[3], c[4], 2)
@@ -414,7 +431,10 @@ def split_sections(text: str) -> list[Section]:
                 body_follows = bool(c[4]) or c[1] in toc_numbers or (nxt and not _classify(nxt) and not title_like(nxt)
                                               and not _is_toc_entry(nxt))
                 if not body_follows:
-                    toc_numbers.add(c[1]); i += 1; continue
+                    toc_numbers.add(c[1])
+                    if c[0] == "top":
+                        toc_main.add(c[1])
+                    i += 1; continue
                 in_toc = False
             else:
                 i += 1; continue
@@ -457,7 +477,7 @@ def split_sections(text: str) -> list[Section]:
             target = parent
             i += 1; continue
         if kind == "annex":
-            in_annex = True
+            in_annex = True; annex_item = 0
         elif kind == "kw" and level == 1:
             in_annex = False  # "ARTICLE 9" after an annex resumes the body
         if kind == "annex":

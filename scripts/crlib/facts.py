@@ -30,13 +30,20 @@ PROHIBIT = (r"shall\s+not|must\s+not|may\s+not|will\s+not|cannot|can\s+not|shall
 RIGHT = r"shall\s+be\s+entitled\s+to|is\s+entitled\s+to|are\s+entitled\s+to|may"
 DUTY = r"shall|must|will|is\s+required\s+to|are\s+required\s+to|agrees?\s+to"
 MODAL = re.compile(rf"\b(?:(?P<no>{PROHIBIT})|(?P<right>{RIGHT})|(?P<duty>{DUTY}))\b", re.I)
-# no break after abbreviations: i.e. e.g. Art. No. s.
+# no break after abbreviations: i.e. e.g. Art. No. s. Mr. Ms. Dr. Sec.
 SENT = re.compile(r"(?<=[.;])(?<!\bi\.e\.)(?<!\be\.g\.)(?<!\b[Aa]rt\.)(?<!\b[Nn]o\.)(?<!\bs\.)"
+                  r"(?<!\bMr\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\b[Ss]ec\.)"
                   r"\s+(?=[A-Z(])(?<!\d\.\s)|\s+(?=\((?:[a-z]{1,2}|[ivx]{1,5})\)\s)")
 MAX_LEN = 160
 # a leading cross-reference in a subject: "See Art. 5", "per Section 3.2", "Article 7"
 REF = re.compile(r"^(?:(?:see|per|under|pursuant to)\s+)?(?:art(?:icle)?|section|s|clause|no)\.?\s*"
                  r"\d[\d.]*(?:\([a-z0-9]+\))*\.?\s*", re.I)
+# a dot ending one of these abbreviations is not a clause break inside a subject
+ABBR_DOT = r"(?<!\bi\.e)(?<!\be\.g)(?<!\b[Aa]rt)(?<!\b[Nn]o)(?<!\bs)(?<!\bMr)(?<!\bMs)(?<!\bDr)(?<!\b[Ss]ec)"
+APPOSITIVE = re.compile(r"^(?:i\.e\.|e\.g\.|namely|including|being)\s", re.I)
+LEAD_PHRASE = re.compile(r"^(?:pursuant to|subject to|under|in accordance with|notwithstanding|despite|"
+                         r"per|according to|for the purposes? of)\b", re.I)
+DETERMINER = re.compile(r"\b(?:the|an?|each|every|any|all|such|no)\s", re.I)
 MAX_CHUNK = 2000
 OVERLAP = 200  # windows of an over-long sentence overlap; _scan keeps one match per span
 
@@ -66,10 +73,17 @@ def obligation(sentence: str) -> dict | None:
     before = sentence[: m.start()].strip(" ,")
     # the subject is the last clause/noun phrase before the modal: cut at sentence or clause
     # breaks ("See Art. 5. The Union" -> "The Union"), but not inside i.e./e.g./Art./No.
-    who = re.split(r"(?<!\bi\.e)(?<!\be\.g)(?<!\b[Aa]rt)(?<!\b[Nn]o)(?<!\bs)\.\s+(?=[A-Z(])|[,;:]"
-                   r"|\b(?:if|when|where|unless|and|that|which)\b", before)[-1].strip()
+    segs = [x.strip() for x in re.split(ABBR_DOT + r"\.\s+(?=[A-Z(])|[,;:]"
+                                        r"|\b(?:if|when|where|unless|and|that|which)\b", before)]
+    while len(segs) > 1 and APPOSITIVE.match(segs[-1]):
+        segs.pop()  # "The Union, i.e. Local 1," -> "The Union"
+    who = segs[-1]
+    if LEAD_PHRASE.match(who) or REF.match(who):  # "Pursuant to s. 12 of the Act the Employer" -> "the Employer"
+        dets = list(DETERMINER.finditer(who))
+        if dets and dets[-1].start() > 0:
+            who = who[dets[-1].start():]
     who = REF.sub("", who).strip()
-    who = re.sub(r"^\(?[a-z0-9ivx]{1,4}[.)]\s*", "", who).strip()
+    who = re.sub(r"^\((?:[a-z0-9]{1,4})\)\s*|^(?:[a-z0-9]{1,4})[.)](?!e\.|g\.)\s*", "", who).strip()
     after = sentence[m.end():]
     negsubj = re.match(r"^(?:nothing|neither|no(?:ne)?\b)", who, re.I)
     if negsubj and re.match(r"^(?:\s+be)?\s+(?:construed|interpreted|deemed|prevent|preclude|limit|restrict|"

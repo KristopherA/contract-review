@@ -55,14 +55,14 @@ def test_sentence_footer_on_3_of_5_pages():
     assert "Subject to Article 12" not in body(split_sections(pages(*top)))
 
 
-def test_body_article_resumes_after_annex():
+def test_numbers_after_annex_stay_in_annex_without_toc():
+    """Draft 10 replaced draft 9's last+1 rule: without a TOC or ARTICLE keyword, "3." after
+    a schedule stays in it (the corpus covers the TOC / keyword cases)."""
     txt = ("1. PURPOSE\nPurpose text here.\n2. WAGES\nWage text here.\n"
            "SCHEDULE A - BENEFITS\n1. DENTAL\nDental text here.\n"
-           "3. HOURS\nThe Employer shall schedule hours.\n4. LEAVE\nLeave text here.\n")
+           "3. HOURS\nThe Employer shall schedule hours.\n")
     secs = {s.number: s for s in split_sections(txt)}
-    assert secs["3"].title == "HOURS" and secs["3"].level == 1 and "schedule hours" in secs["3"].text
-    assert secs["4"].title == "LEAVE"
-    assert "Schedule A 1" in secs and "hours" not in secs["Schedule A 1"].text
+    assert "3" not in secs and secs["Schedule A 3"].title == "HOURS"
 
 
 def test_who_is_last_noun_phrase():

@@ -138,6 +138,12 @@ and generate their PDF and DOCX fixtures at run time.
   `Article IV`) and upper-case annex headings. Unnumbered, multi-column body
   text or table-heavy layouts split poorly; a letter without a `Re:` line gets a
   derived title.
+- After an annex/schedule, the main body resumes only on an `ARTICLE N` heading,
+  a new annex heading, or an `N.` that the table of contents lists as a main
+  article (and that does not continue the schedule's items). A `1. TITLE`
+  document with no TOC keeps everything after its first schedule in that
+  schedule. Header/footer removal never drops a heading line; the rules are
+  pinned by the layout corpus in `tests/layout_cases.py`.
 - Evolve matches a clause by number or by a close title; a short or different
   name (e.g. a single word for a longer heading) may report it as absent.
 - DOCX extraction reads the main body only (no headers, footers, comments or

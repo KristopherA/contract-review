@@ -15,20 +15,22 @@ def fixtures():
     return FIX
 
 
-def make_pdf(path: Path, lines: list[str]) -> Path:
-    """Write a minimal single-page text PDF (Helvetica), no third-party libs."""
+def make_pdf(path: Path, lines: list[str], per_page: int = 60) -> Path:
+    """Write a minimal text PDF (Helvetica), `per_page` lines per page, no third-party libs."""
     def esc(s):
         return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    body = "BT /F1 10 Tf 12 TL 50 780 Td " + " ".join(f"({esc(l)}) Tj T*" for l in lines) + " ET"
-    stream = body.encode("latin-1")
-    objs = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents 4 0 R "
-        b"/Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    ]
+    pages = [lines[i:i + per_page] for i in range(0, len(lines), per_page)] or [[]]
+    n = len(pages)
+    font = 3 + 2 * n
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [%s] /Count %d >>" % (" ".join(f"{3 + 2 * i} 0 R" for i in range(n)).encode(), n)]
+    for i, pg in enumerate(pages):
+        body = "BT /F1 10 Tf 12 TL 50 780 Td " + " ".join(f"({esc(l)}) Tj T*" for l in pg) + " ET"
+        stream = body.encode("latin-1")
+        objs.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Contents %d 0 R "
+                    b"/Resources << /Font << /F1 %d 0 R >> >> >>" % (4 + 2 * i, font))
+        objs.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+    objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     out, offs = bytearray(b"%PDF-1.4\n"), []
     for i, o in enumerate(objs, 1):
         offs.append(len(out)); out += b"%d 0 obj\n" % i + o + b"\nendobj\n"

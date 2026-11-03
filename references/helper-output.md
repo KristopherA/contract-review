@@ -13,7 +13,15 @@
 | order | position in the document |
 
 ## outline
-`sections[]` = section + `cite`, `topic_hints[]`, `dates[]`, `amounts[]`, `durations[]`.
+`sections[]` = section + `cite`, `clauses[]` (untitled sub-clause numbers merged in) and
+`key_facts` = `{amounts, percentages, durations, dates: [{value, cite}], deadlines:
+[{text, cite}], obligations: [{kind: obligation|prohibition|right, who, text, cite}]}`.
+Facts are regex-based, no model. `--summaries FILE` (JSON `{section id: text}`) adds a
+`**Summary:**` line per section in Markdown; off by default.
+Sections: only `ARTICLE/SECTION/CLAUSE N`, `N` and `N.NN` headings count; TOC entries
+(dot leaders, page numbers, a CONTENTS block), page footers and `(a)`/`(i)`/`1.` list
+items stay out. A clause number must belong to the current article; an untitled
+`N.NN` clause is merged into its article as a cited part.
 `boilerplate_folded[]` = `{section, id, clause, score}`. Threshold: library `threshold`
 (default 95) or `--threshold`; per-clause `threshold` overrides. A section folds only
 if, in addition, its numbers/amounts, its negation/exception words (not, no, never,

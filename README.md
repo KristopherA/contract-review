@@ -12,9 +12,11 @@ Ollama model.
 
 ## What it does
 
-1. **Outline**: parties, dates, term/renewal, termination, money/rates,
-   liability/indemnity, confidentiality and unusual terms, each citing its
-   clause. Standard boilerplate is folded away using an editable library
+1. **Outline**: every real article/clause with its title and cited key facts
+   (amounts, percentages, time periods, dates, deadlines, who shall/must/may do
+   what), extracted deterministically with no model. The table of contents and
+   `(a)`/`(i)`/`1.` list items are skipped. Optional plain-language summaries
+   (`--summaries`, off by default) can be written by Hermes. Standard boilerplate is folded away using an editable library
    (`assets/boilerplate.yaml`, fuzzy matched with a threshold).
 2. **Diff**: aligns sections between two versions even when they are
    renumbered or moved (title + content similarity), shows a word-level diff,
@@ -86,6 +88,7 @@ Helpers directly:
 ```sh
 S=~/.hermes/skills/contract-review/scripts/contract_review.py
 python3 $S outline contract.pdf --format md
+python3 $S outline contract.pdf --summaries summaries.json --format md   # optional
 python3 $S diff old.docx new.docx > changes.json
 python3 $S diff old.docx new.docx --summaries summaries.json --format md > diff.md
 python3 $S evolve v1.pdf v2.pdf v3.pdf --section "Termination" --format md

@@ -24,5 +24,6 @@ def test_heading_variants():
 
 def test_long_numbered_line_has_no_title():
     secs = split_sections("2.3 The Supplier shall maintain insurance of not less than the amount set out in Schedule C at all times.\n")
-    assert secs[0].number == "2.3" and secs[0].title == ""
+    # draft 5: no blank titles; an orphan untitled clause gets a derived title
+    assert secs[0].number == "2.3" and secs[0].title == "The Supplier shall maintain insurance of…"
     assert secs[0].text.startswith("The Supplier shall maintain")

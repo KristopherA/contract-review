@@ -31,17 +31,24 @@ python3 $SKILL/scripts/contract_review.py <command> ...
 
 ## 1. Outline a contract
 
-1. `python3 $SKILL/scripts/contract_review.py outline FILE [--library PATH]`
-   returns JSON: `sections` (each with `cite`, `text`, `topic_hints`, `dates`,
-   `amounts`, `durations`) and `boilerplate_folded` (standard clauses removed).
-2. Write the report with [templates/outline.md](templates/outline.md). For every
-   topic (parties, dates, term/renewal, termination, money/rates,
-   liability/indemnity, confidentiality, unusual) give short bullets, each ending
-   with its citation, e.g. `(§4 Fees and Payment)`. Hints are leads, not answers:
-   read the section text. Write "Not found" rather than guessing.
-3. "Unusual" = anything one-sided, uncapped, auto-renewing with long notice,
-   unilateral change rights, unusual governing law, or missing a topic you expected.
-4. List folded boilerplate at the end in one line each.
+1. `python3 $SKILL/scripts/contract_review.py outline FILE --format md [--library PATH]`
+   prints one heading per real article/clause (`ARTICLE 12`, `12`, `12.01`) with its
+   title and deterministic key facts: amounts, percentages, time periods, dates,
+   deadlines ("within 30 days") and obligation/right/prohibition sentences, each
+   cited (`§12.01`). The table of contents, page footers, and `(a)`, `(i)`, `1.` list
+   items are not sections. Standard boilerplate is folded and listed at the end.
+   `--format json` gives `sections[].key_facts` for your own use.
+2. By default, give the user that outline as is. Do not add a model summary unless
+   they ask for one ("summarize", "plain English").
+3. Optional plain-language summaries: read each section's `text` from the JSON,
+   write one or two sentences per section id using only that text, and save
+   `{"s3": "...", ...}` to `summaries.json`. Then rerun with
+   `--summaries summaries.json --format md`. Lay it out with
+   [templates/outline.md](templates/outline.md). Never add a fact that is not in the
+   section's text. Keep the cited key facts under each summary.
+4. Flag anything unusual you notice (one-sided, uncapped, unilateral change rights,
+   long notice periods) under "Unusual", with citations. Write "Not found" rather
+   than guessing.
 
 ## 2. Diff old vs new
 

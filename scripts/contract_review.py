@@ -53,6 +53,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("outline"); p.add_argument("file")
     p.add_argument("--library"); p.add_argument("--threshold", type=float)
     p.add_argument("--no-fold", action="store_true"); p.add_argument("--format", choices=["json", "md"], default="json")
+    p.add_argument("--summaries", help="optional JSON {section_id: plain summary} written by the model (off by default)")
     p = sub.add_parser("diff"); p.add_argument("old"); p.add_argument("new")
     p.add_argument("--match-threshold", type=float, default=DEFAULT_MATCH)
     p.add_argument("--summaries", help="JSON {change_id: one-line summary} written by the model")
@@ -71,7 +72,8 @@ def main(argv=None) -> int:
         elif a.cmd == "outline":
             lib = None if a.no_fold else boilerplate.load_library(a.library)
             o = build(_secs(a.file, a.pdf_backend), lib, a.threshold)
-            _emit(o, a.format, lambda: report.outline_markdown(o, Path(a.file).name))
+            _emit(o, a.format, lambda: report.outline_markdown(o, Path(a.file).name,
+                                                                    _load_json(a.summaries)))
         elif a.cmd == "diff":
             ch = diff_documents(_secs(a.old, a.pdf_backend), _secs(a.new, a.pdf_backend), a.match_threshold)
             _emit(ch, a.format, lambda: report.diff_markdown(ch, Path(a.old).name, Path(a.new).name,

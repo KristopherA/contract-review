@@ -50,12 +50,25 @@ def evolution_markdown(result, summary=None, notes=None) -> str:
     return "\n".join(lines)
 
 
-def outline_markdown(outline, name) -> str:
-    lines = [f"# Outline scaffold: {name}", "", NOTE, "## Sections", ""]
+def outline_markdown(outline, name, summaries=None) -> str:
+    """Key facts per real section; optional model summaries ({section id: text})."""
+    summaries = summaries or {}
+    lines = [f"# Outline: {name}", "", NOTE,
+             f"{len(outline['sections'])} section(s); {len(outline['boilerplate_folded'])} folded as boilerplate.", ""]
     for s in outline["sections"]:
-        hints = ", ".join(s["topic_hints"]) or "—"
-        lines.append(f"- **{s['cite']}** — hints: {hints}")
-    lines += ["", "## Folded boilerplate", ""]
+        lines += [f"## {s['cite']}", ""]
+        if s["id"] in summaries:
+            lines += [f"**Summary:** {summaries[s['id']]}", ""]
+        f = s["key_facts"]
+        vals = []
+        for key, lbl in (("amounts", "Amounts"), ("percentages", "Percentages"), ("durations", "Time periods"),
+                         ("dates", "Dates")):
+            if f[key]:
+                vals.append(f"- **{lbl}:** " + "; ".join(f"{x['value']} ({x['cite']})" for x in f[key]))
+        vals += [f"- **Deadline:** {x['text']} ({x['cite']})" for x in f["deadlines"]]
+        vals += [f"- **{x['kind'].capitalize()}:** {x['text']} ({x['cite']})" for x in f["obligations"]]
+        lines += (vals or ["- No numeric facts or obligations found."]) + [""]
+    lines += ["## Folded boilerplate", ""]
     if outline["boilerplate_folded"]:
         for f in outline["boilerplate_folded"]:
             lines.append(f"- {f['section']} ≈ standard `{f['clause']}` ({f['score']}%)")

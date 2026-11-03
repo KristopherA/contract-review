@@ -72,14 +72,16 @@ def test_threshold_override(tmp_path):
     assert bp.match("Customer pays $10 per seat.", "Fees", library) is None
 
 
-def test_no_fold_and_hints(fixtures):
+def test_no_fold_and_facts(fixtures):
     secs = split_sections(extract_text(fixtures / "msa_v1.txt"))
     o = build(secs, None)
     assert len(o["sections"]) == len(secs) and o["boilerplate_folded"] == []
     fees = next(s for s in o["sections"] if s["title"] == "Fees and Payment")
-    assert "money_rates" in fees["topic_hints"] and "$5,000 USD" in fees["amounts"]
-    assert "1.5%" in fees["amounts"] and fees["cite"] == "§4 Fees and Payment"
-    assert "January 15, 2025" in o["sections"][0]["dates"]
+    f = fees["key_facts"]
+    assert "topic_hints" not in fees
+    assert "$5,000 USD" in [x["value"] for x in f["amounts"]]
+    assert "1.5%" in [x["value"] for x in f["percentages"]] and fees["cite"] == "§4 Fees and Payment"
+    assert "January 15, 2025" in [x["value"] for x in o["sections"][0]["key_facts"]["dates"]]
 
 
 @pytest.mark.parametrize("body", ["clauses:\n  - id: x\n", "clauses: {a: 1}\n", "- 1\n- 2\n",

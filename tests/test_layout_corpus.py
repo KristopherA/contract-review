@@ -1,4 +1,4 @@
-"""Table-driven layout corpus: every page-layout case from drafts 5-10 (tests/layout_cases.py).
+"""Table-driven layout corpus: every page-layout case from drafts 5-11 (tests/layout_cases.py).
 For each case the full section tree (ids, numbers, titles), the clause every fact cites,
 and the absence of leaked header/footer text are asserted."""
 import pytest
@@ -37,4 +37,4 @@ def test_layout_case(c):
 
 
 def test_corpus_size():
-    assert len(CASES) >= 29
+    assert len(CASES) >= 42

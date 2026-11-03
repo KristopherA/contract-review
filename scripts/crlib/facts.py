@@ -1,5 +1,5 @@
 """Deterministic key-fact extraction (no model): amounts, percentages, durations,
-dates, deadlines and obligation sentences, each with its clause citation."""
+dates, deadlines, obligation sentences and definitions, each with its clause citation."""
 from __future__ import annotations
 
 import re
@@ -14,9 +14,13 @@ PERCENT = re.compile(r"\b\d+(?:\.\d+)?\s?(?:%|percent\b)")
 _ONES = ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
          "sixteen seventeen eighteen nineteen").split()
 _TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split()
-_WORDS = _ONES + _TENS + [f"{t}-{o}" for t in _TENS for o in _ONES[:9]] + ["hundred", "a", "one-half", "half"]
-_BASE = "|".join(sorted(_WORDS, key=len, reverse=True))
-WORDNUM = rf"(?:(?:{_BASE})(?:\s+and\s+(?:one-half|a\s+half))?)"
+_DIG = "zero one two three four five six seven eight nine".split()
+_ONE_RX = "|".join(sorted(_ONES, key=len, reverse=True))
+_SMALL = rf"(?:(?:{'|'.join(_TENS)})(?:[\s-](?:{'|'.join(_ONES[:9])}))?|{_ONE_RX}|zero)"
+# "four hundred and fifty-six", "twenty four", "seven point five", "one point zero seven"
+_INT = rf"(?:(?:{_ONE_RX})\s+hundred(?:\s+(?:and\s+)?{_SMALL})?|{_SMALL}|hundred)"
+_DEC = rf"(?:{_INT}\s+point(?:\s+(?:{'|'.join(_DIG)})){{1,3}})"
+WORDNUM = rf"(?:(?:{_DEC}|{_INT})(?:\s+and\s+(?:one-half|a\s+half))?|one-half|half|a)"
 NUM = rf"(?:{WORDNUM}\s*\(\d+(?:\.\d+)?\)|\d+(?:\.\d+)?|{WORDNUM})"
 UNIT = r"(?:calendar\s+|working\s+|business\s+|consecutive\s+)?(?:minutes?|hours?|days?|weeks?|months?|years?|Working\s+Days?)"
 DURATION = re.compile(rf"\b{NUM}\s+{UNIT}\b", re.I)
@@ -44,6 +48,11 @@ APPOSITIVE = re.compile(r"^(?:i\.e\.|e\.g\.|namely|including|being)\s", re.I)
 LEAD_PHRASE = re.compile(r"^(?:pursuant to|subject to|under|in accordance with|notwithstanding|despite|"
                          r"per|according to|for the purposes? of)\b", re.I)
 DETERMINER = re.compile(r"\b(?:the|an?|each|every|any|all|such|no)\s", re.I)
+# "X shall mean ...", "X means ...": a definition, never an obligation of "X"
+DEFINITION = re.compile(r"^(?:\(?[a-z0-9]{1,4}[.)]\s*)?(?P<term>[\"\u201c']?[A-Za-z][\w'\u2019 -]{0,60}?[\"\u201d']?)"
+                        r"\s+(?:shall\s+mean|means|shall\s+include|includes|refers?\s+to|shall\s+refer\s+to|"
+                        r"is\s+defined\s+as|shall\s+be\s+defined\s+as)\b")
+MAX_WHO_WORDS = 8
 MAX_CHUNK = 2000
 OVERLAP = 200  # windows of an over-long sentence overlap; _scan keeps one match per span
 
@@ -90,7 +99,86 @@ def obligation(sentence: str) -> dict | None:
                             r"affect|prejudice|bar)\w*", after, re.I):
         return None  # "Nothing shall prevent/limit ..." is a saving clause, not a duty of "Nothing"
     kind = "prohibition" if m["no"] or (negsubj and not m["right"]) else "right" if m["right"] else "obligation"
+    words = who.split()
+    if len(words) > MAX_WHO_WORDS:  # a subject is a short noun phrase: keep its last words
+        who = " ".join(words[-MAX_WHO_WORDS:])
     return {"kind": kind, "who": who[-60:] or "—", "text": _short(sentence)}
+
+
+def definition(sentence: str) -> dict | None:
+    m = DEFINITION.match(sentence)
+    if not m or len(m["term"].split()) > MAX_WHO_WORDS:
+        return None
+    term = m["term"].strip(" \"'\u201c\u201d")
+    if re.match(r"^(?:the\s+)?(?:employer|union|employee|parties|party|company|this|it|he|she|they)$", term, re.I) \
+            and "includes" in m.group(0).lower():
+        return None  # "The Employer includes ..." is too ambiguous to call a definition
+    return {"term": term, "text": _short(sentence)}
+
+
+# word values for pairing "five (5)": the bracket counts only when it agrees
+_VAL = {w: i + 1 for i, w in enumerate(_ONES)}
+_VAL.update({w: 20 + 10 * i for i, w in enumerate(_TENS)})
+_VAL.update({"zero": 0})
+_DIGV = {w: i for i, w in enumerate(_DIG)}
+
+
+def _int_value(toks: list[str]) -> float | None:
+    total, cur = 0, 0
+    for t in toks:
+        if t == "and":
+            continue
+        if t == "hundred":
+            cur = (cur or 1) * 100
+        elif t in _VAL:
+            cur += _VAL[t]
+        else:
+            return None
+    return total + cur
+
+
+PAIR = re.compile(rf"^(?P<w>{WORDNUM})\s*\((?P<n>\d+(?:\.\d+)?)\)", re.I)
+# "1.07", "3.01": decimal with a zero-led fraction reads as a clause number, not a quantity
+CLAUSE_NUM = re.compile(r"^\d{1,3}\.0\d")
+REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|s|clause|schedule|appendix)\.?|§)\s*\(?$", re.I)
+
+
+def _word_value(w: str) -> float | None:
+    w = re.sub(r"\s+", " ", w.lower()).strip()
+    if w in ("a", "one-half", "half"):
+        return {"a": 1, "one-half": 0.5, "half": 0.5}[w]
+    half = 0.5 if re.search(r" and (?:one-half|a half)$", w) else 0
+    w = re.sub(r" and (?:one-half|a half)$", "", w)
+    whole, _, frac = w.partition(" point ")
+    v = _int_value(whole.replace("-", " ").split())
+    if v is None:
+        return None
+    if frac:
+        ds = [_DIGV.get(t) for t in frac.split()]
+        if None in ds:
+            return None
+        v += float("0." + "".join(map(str, ds)))
+    return v + half
+
+
+def _quantity(snt: str, start: int, v: str) -> str | None:
+    """Validate a duration/deadline match: "five (7.5) hours" -> "five hours" (the bracket is a
+    clause reference); a clause-number-looking figure ("1.07 days", "Article 7 days") -> None."""
+    lead = re.match(r"^(?:within|no\s+later\s+than|not\s+later\s+than|at\s+least|not\s+less\s+than|"
+                    r"prior\s+to|before|after|by)\s+", v, re.I)
+    off = lead.end() if lead else 0
+    q = v[off:]
+    pm = PAIR.match(q)
+    if pm:
+        wv = _word_value(pm["w"])
+        if wv is None or abs(wv - float(pm["n"])) > 1e-9:
+            q = pm["w"] + q[pm.end():]  # disagreeing bracket: a reference, not the number
+        return v[:off] + q
+    nm = re.match(r"\d+(?:\.\d+)?", q)
+    if nm and (CLAUSE_NUM.match(q) or REF_BEFORE.search(snt[:start + off])
+               or (snt[start + off - 1:start + off] == "(" and snt[start + off + nm.end():][:1] == ")")):
+        return None
+    return v
 
 
 def extract(parts: list[tuple[str, str]]) -> dict:
@@ -99,7 +187,8 @@ def extract(parts: list[tuple[str, str]]) -> dict:
     Text is split into sentences first (one linear pass). Fact regexes run per sentence;
     a sentence longer than MAX_CHUNK is scanned in windows overlapping by OVERLAP chars,
     and matches are de-duplicated by position, so nothing is lost at a window edge."""
-    out = {"amounts": [], "percentages": [], "durations": [], "dates": [], "deadlines": [], "obligations": []}
+    out = {"amounts": [], "percentages": [], "durations": [], "dates": [], "deadlines": [], "obligations": [],
+           "definitions": []}
     for num, text in parts:
         cite = cite_of(num)
         flat = re.sub(r"\s+", " ", text)
@@ -137,8 +226,16 @@ def _scan(snt: str, cite: str, out: dict) -> None:
         for st, en, v in spans:
             if en <= reach:
                 continue
+            if key in ("durations", "deadlines"):
+                v = _quantity(snt, st, v)
+                if v is None:
+                    continue
             keep.append(v); reach = max(reach, en)
         out[key] += [{field_: (_short(v) if field_ == "text" else v), "cite": cite} for v in keep]
+    d = definition(snt)
+    if d:
+        out["definitions"].append({**d, "cite": cite})
+        return
     ob = obligation(snt)  # MODAL is a fixed-word alternation: linear even on long sentences
     if ob:
         out["obligations"].append({**ob, "cite": cite})

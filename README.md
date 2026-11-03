@@ -153,3 +153,9 @@ and generate their PDF and DOCX fixtures at run time.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Draft 11
+Body-page header/footer counting, no-TOC numbering-gap resume, dropped repeated/continued
+headings, Definition facts, 8-word `who` cap, agreeing word/figure pairs only, quiet pypdf,
+and label-stripped boilerplate matching with generic CBA clauses. See
+references/helper-output.md, "Draft 11 rules". Tests: `pytest -q` prints the true count.

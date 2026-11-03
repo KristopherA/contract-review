@@ -32,6 +32,8 @@ ANNEX = re.compile(
     r"^(?P<kw>letter\s+of\s+understanding|letter\s+of\s+intent|memorandum\s+of\s+(?:agreement|understanding)"
     r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?[\x22\x27\u201c]?(?P<id>(?-i:[A-Z0-9]{1,3}|[IVX]{1,5}))[\x22\x27\u201d]?(?=[\s\-–—:.]|$))?"
     r"\s*(?:[-–—:.]\s*)?(?P<rest>.{0,200})$", re.I)
+# "ARTICLE 2 - continued", "ARTICLE 2: WAGES (cont'd)"
+CONTINUED = re.compile(r"^(.*?\S)[\s,:\-–—]*\(?\s*(?:continued|cont['’]?d\.?)\s*\)?$", re.I)
 MAX_LINE = 2000  # longer lines are cut into chunks before any regex runs (bounded runtime)
 TOC_TITLE = re.compile(r"^(?:table\s+of\s+)?contents$|^(?:numerical\s+|alphabetical\s+|subject\s+)?index$", re.I)
 EDGE = 3  # header/footer candidates: first and last EDGE non-empty lines of each page
@@ -244,9 +246,18 @@ def _page_variants(p: int, t: str):
             yield (t[:m.start()] + "#" + t[m.end():], k)
 
 
+def _body_line(x: str) -> bool:
+    return bool(SENT_END.search(x)) and len(x.split()) >= 4 and not _is_toc_entry(x)
+
+
 def _clean_lines(text: str) -> list[str]:
     """Normalise lines, drop page furniture, keep everything else.
 
+    Pages are counted as body pages only when they carry a full sentence (4+ words) outside
+    the edge slots (or two anywhere); cover, title and TOC pages do not count. A line in the
+    same edge slot on every body page (at least ALWAYS_MIN), or on every odd or every even
+    body page (at least ALWAYS_MIN of them) and on under half of the other parity, is
+    always dropped.
     1. Running headers/footers: an edge line (one of the first/last EDGE non-empty lines)
        identical, except for the page-number position, in the same edge slot on >=3 pages
        and on at least ALWAYS_SHARE (80%) of the pages, minimum ALWAYS_MIN (4) pages, is
@@ -271,10 +282,22 @@ def _clean_lines(text: str) -> list[str]:
         for r, i in enumerate(reversed(idx[-EDGE:])):
             edges.append((p, i, ("bottom", r), pg[i]))
     n_pages = len(pages)
+    edge_at = {(p, i) for p, i, _, _ in edges}
+    # body pages: a page with a full sentence of 4+ words outside the edge slots, or with
+    # 2+ such sentences anywhere. Cover, title and TOC pages are left out of the counts.
+    body = set()
+    for p, pg in enumerate(pages):
+        inner = sum(1 for i, x in enumerate(pg) if x and (p, i) not in edge_at and _body_line(x))
+        anyw = sum(1 for x in pg if x and _body_line(x))
+        if inner or anyw >= 2:
+            body.add(p)
+    n_body = len(body) or n_pages
     # 1) repeated headers/footers (checked first)
     if n_pages >= 2:
         need = min(3, n_pages)
         where: dict[tuple, int] = {}
+        par: dict[tuple, int] = {}  # (key, page parity) -> body pages
+        n_par = [sum(1 for p in body if p % 2 == k) for k in (0, 1)] if body else [0, 0]
         cand = []  # (page, line, [keys]) computed once per edge line
         var: dict[tuple[int, int], list | None] = {}
         for p, i, slot, t in edges:
@@ -285,21 +308,29 @@ def _clean_lines(text: str) -> list[str]:
                 continue
             keys = [(slot, v) for v in vs]
             cand.append((p, i, t, keys))
+            if body and p not in body:
+                continue  # cover/TOC pages do not count toward a repeat
             for key in keys:  # one edge slot per page, so a count is a page count
                 where[key] = where.get(key, 0) + 1
+                par[(key, p % 2)] = par.get((key, p % 2), 0) + 1
         bottom = {(p, i) for p, i, slot, _ in edges if slot[0] == "bottom"}
-        always = max(ALWAYS_MIN, math.ceil(ALWAYS_SHARE * n_pages))
+        always = max(ALWAYS_MIN, math.ceil(ALWAYS_SHARE * n_body))
         for p, i, t, keys in cand:
-            best = max(where[k] for k in keys)
+            best = max(where.get(k, 0) for k in keys)
+            alt = any(par.get((k, q), 0) >= max(ALWAYS_MIN, n_par[q]) and par.get((k, 1 - q), 0) * 2 < n_par[1 - q]
+                      for k in keys for q in (0, 1))
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
             if _classify(t):
                 continue  # a heading is never furniture ("ARTICLE 1", "ARTICLE 2" at page tops)
             top = (p, i) not in bottom  # on a short page a line can sit in both edges
+            if best >= n_body and best >= ALWAYS_MIN or alt:
+                drop.add((p, i))  # on every body page (or every odd/even one): furniture
+                continue
             if best >= always:
                 # same slot on (nearly) every page: furniture, except a bottom-edge full
                 # sentence with a modal or $ that is missing from at least one page
-                if top or best >= n_pages or not (SENT_END.search(t) and BODY_MARK.search(t)):
+                if top or not (SENT_END.search(t) and BODY_MARK.search(t)):
                     drop.add((p, i))
                 continue
             if not top and KEEP_LINE.search(t):
@@ -400,7 +431,20 @@ def split_sections(text: str) -> list[Section]:
                 if c[0] == "top":
                     toc_main.add(c[1])
             i += 1; continue
-        c = _classify(line)
+        cm = CONTINUED.match(line)
+        c = _classify(cm[1] if cm else line)
+        # an untitled second "LETTER OF UNDERSTANDING" is a new letter: annexes repeat only
+        # with an explicit "continued"
+        if c and not in_toc and (c[0] == "kw" or c[0] == "annex" and cm) and c[5] == 1 and heads:
+            open_ = next((h for h in reversed(heads) if h["level"] == 1), None)
+            if open_ is not None and open_["num"] == c[1] and (cm or not c[3] or c[3] == open_["title"]) \
+                    and not c[4]:
+                i += 1; continue  # "ARTICLE 2: WAGES" repeated atop its next page / "- continued"
+        if c and c[0] == "top" and in_annex and not in_toc and not style_kw and not toc_main \
+                and last_main and c[2] == last_main + 1 and c[2] != annex_item + 1:
+            # no TOC: a number that skips the schedule's own sequence but continues the
+            # main one ("SCHEDULE A / 1. RATES / 3. HOURS" after "2. WAGES") resumes the body
+            in_annex = False; last_top = last_main
         if c and c[0] == "top" and in_annex and not in_toc and not style_kw and c[1] in toc_main \
                 and c[2] != annex_item + 1:
             # the TOC lists "3." as a main article and it does not continue the schedule's

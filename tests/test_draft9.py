@@ -55,13 +55,16 @@ def test_sentence_footer_on_3_of_5_pages():
     assert "Subject to Article 12" not in body(split_sections(pages(*top)))
 
 
-def test_numbers_after_annex_stay_in_annex_without_toc():
-    """Draft 10 replaced draft 9's last+1 rule: without a TOC or ARTICLE keyword, "3." after
-    a schedule stays in it (the corpus covers the TOC / keyword cases)."""
-    txt = ("1. PURPOSE\nPurpose text here.\n2. WAGES\nWage text here.\n"
-           "SCHEDULE A - BENEFITS\n1. DENTAL\nDental text here.\n"
-           "3. HOURS\nThe Employer shall schedule hours.\n")
-    secs = {s.number: s for s in split_sections(txt)}
+def test_numbers_after_annex_without_toc():
+    """Draft 11: without a TOC, "3." after a schedule stays in it when it continues the
+    schedule's items, and resumes the body when it skips them but continues the main
+    sequence (the corpus covers the TOC / keyword cases)."""
+    head = "1. PURPOSE\nPurpose text here.\n2. WAGES\nWage text here.\nSCHEDULE A - BENEFITS\n"
+    secs = {s.number: s for s in split_sections(head + "1. DENTAL\nDental text here.\n"
+                                                "3. HOURS\nThe Employer shall schedule hours.\n")}
+    assert secs["3"].title == "HOURS"
+    secs = {s.number: s for s in split_sections(head + "1. DENTAL\nDental text here.\n2. VISION\nVision text.\n"
+                                                "3. HOURS\nThe Employer shall schedule hours.\n")}
     assert "3" not in secs and secs["Schedule A 3"].title == "HOURS"
 
 

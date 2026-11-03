@@ -1,7 +1,10 @@
 """Text extraction for PDF, DOCX, TXT and Markdown. Local only, bounded resources."""
 from __future__ import annotations
 
+import contextlib
+import logging
 import re
+import warnings
 import shutil
 import subprocess
 import zipfile
@@ -22,6 +25,21 @@ MAX_PDF_BYTES = 50 * 1024 * 1024
 MAX_PDF_PAGES = 500
 MAX_TEXT_BYTES = 20 * 1024 * 1024
 PDFTOTEXT_TIMEOUT = 120
+
+
+@contextlib.contextmanager
+def _quiet_pypdf():
+    """pypdf logs recoverable damage ("Ignoring wrong pointing object") to stderr; silence
+    its logger and warnings while we read. Real failures still raise and are reported."""
+    log = logging.getLogger("pypdf")
+    old = log.level
+    log.setLevel(logging.CRITICAL)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            yield
+    finally:
+        log.setLevel(old)
 
 
 class ExtractionError(RuntimeError):
@@ -78,7 +96,8 @@ def _page_count_pypdf(path: Path) -> int:
     except ImportError as exc:
         raise ExtractionError("cannot count PDF pages: neither pdfinfo nor pypdf is available") from exc
     try:
-        return len(PdfReader(str(path)).pages)
+        with _quiet_pypdf():
+            return len(PdfReader(str(path)).pages)
     except Exception as exc:
         raise ExtractionError(f"{path.name}: unreadable PDF ({type(exc).__name__}: {exc})") from exc
 
@@ -107,10 +126,11 @@ def _pdf_pypdf(path: Path) -> str:
     except ImportError as exc:
         raise ExtractionError("pypdf is not installed") from exc
     try:
-        reader = PdfReader(str(path))
-        if len(reader.pages) > MAX_PDF_PAGES:
-            raise ExtractionError(f"{path.name}: more than {MAX_PDF_PAGES} pages")
-        return "\n\f\n".join((page.extract_text() or "") for page in reader.pages)
+        with _quiet_pypdf():
+            reader = PdfReader(str(path))
+            if len(reader.pages) > MAX_PDF_PAGES:
+                raise ExtractionError(f"{path.name}: more than {MAX_PDF_PAGES} pages")
+            return "\n\f\n".join((page.extract_text() or "") for page in reader.pages)
     except ExtractionError:
         raise
     except Exception as exc:  # pypdf raises many types (PdfReadError, ValueError, KeyError...)

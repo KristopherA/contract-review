@@ -15,7 +15,8 @@
 ## outline
 `sections[]` = section + `cite`, `clauses[]` (untitled sub-clause numbers merged in) and
 `key_facts` = `{amounts, percentages, durations, dates: [{value, cite}], deadlines:
-[{text, cite}], obligations: [{kind: obligation|prohibition|right, who, text, cite}]}`.
+[{text, cite}], obligations: [{kind: obligation|prohibition|right, who, text, cite}],
+definitions: [{term, text, cite}]}`.
 Facts are regex-based, no model. Text is split into sentences first and the regexes run
 per sentence; a sentence over 2000 chars is scanned in 2000-char windows overlapping by
 200, so matching stays linear, and each fact is reported once. "Nothing shall
@@ -92,3 +93,28 @@ pdftotext timeout 120 s (then falls back to pypdf in `auto`). Errors print
 renumbered_from?, word_diff?}`. Status: baseline, first-seen, changed, unchanged,
 removed, reappeared, absent. The section is followed by alignment from the
 previous version, falling back to a title/number search.
+
+## Draft 11 rules
+- Headers/footers: only body pages count (a page with an inner sentence line, or 2+
+  sentence lines; cover, title and TOC pages are left out). A line identical on every
+  body page (at least 4) is dropped, period or not; so is a line on every page of one
+  parity (at least 4) that appears on under half of the other parity.
+- No-TOC schedule numbering gap: inside a schedule/annex with no TOC, a numbered heading
+  that continues the main sequence (last main + 1) and not the schedule's own (item + 1)
+  resumes the body. Limit: a schedule that legitimately skips to that number is misread.
+- An exact repeat of the open article heading, or "ARTICLE N - continued / (cont'd)",
+  with no body, is dropped. Untitled annex headings (e.g. two "LETTER OF UNDERSTANDING")
+  repeat only with an explicit "continued", so separate letters stay separate.
+- "X shall mean / means / includes / refers to / is defined as" sentences are
+  definitions, not obligations ("includes" with a party/pronoun subject is not).
+- `who` keeps at most the last 8 words.
+- Durations/deadlines: spelled-out numbers include compounds ("twenty four",
+  "four hundred and fifty six") and decimals ("seven point five"). "word (n)" keeps the
+  bracket only when both values agree; otherwise the bracket is dropped. A bare number
+  after Article/Section/s./Clause/Schedule/Appendix/§, or shaped like `1.07`, is a
+  reference, not a quantity.
+- pypdf log output and warnings are silenced; the page-count cross-check stays.
+- Boilerplate: leading clause labels ("12.01") are stripped before matching, so the
+  numbers guard no longer fails on every numbered clause; the library has generic
+  collective-agreement clauses (management rights, no discrimination, severability,
+  entire agreement, notices, term, no strike, gender).

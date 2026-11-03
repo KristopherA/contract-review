@@ -92,6 +92,7 @@ def outline_markdown(outline, name, summaries=None) -> str:
                 vals.append(f"- **{lbl}:** " + "; ".join(f"{x['value']} ({x['cite']})" for x in f[key]))
         vals += [f"- **Deadline:** {x['text']} ({x['cite']})" for x in f["deadlines"]]
         vals += [f"- **{x['kind'].capitalize()}:** {x['text']} ({x['cite']})" for x in f["obligations"]]
+        vals += [f"- **Definition:** {x['text']} ({x['cite']})" for x in f.get("definitions", [])]
         lines += (vals or ["- No numeric facts or obligations found."]) + [""]
     lines += ["## Folded boilerplate", ""]
     if outline["boilerplate_folded"]:

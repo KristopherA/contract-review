@@ -33,3 +33,47 @@ clauses:
     title: Headings
     text: >-
       Headings are for convenience only and do not affect the interpretation of this Agreement.
+  # --- collective-agreement style (generic wording; replace with your own standard text) ---
+  - id: cba-management-rights
+    title: Management Rights
+    text: >-
+      The Union recognizes that, except as expressly limited by this Agreement, the Employer
+      retains the exclusive right to manage its operations, to direct the work force, and to
+      hire, assign, promote, transfer, discipline and discharge employees for just cause.
+  - id: cba-no-discrimination
+    title: No Discrimination
+    text: >-
+      The Employer and the Union agree that there shall be no discrimination against any
+      employee on any ground protected by applicable human rights legislation, or by reason of
+      membership or activity in the Union.
+  - id: cba-severability
+    title: Severability
+    text: >-
+      If any provision of this Agreement is found to be contrary to any applicable law, that
+      provision shall be void to the extent of the conflict, and all other provisions of this
+      Agreement shall remain in full force and effect.
+  - id: cba-entire-agreement
+    title: Entire Agreement
+    text: >-
+      This Agreement constitutes the entire agreement between the parties, and any amendment
+      to it shall be made in writing and signed by both parties.
+  - id: cba-notices
+    title: Notices
+    text: >-
+      Any notice required under this Agreement shall be given in writing and delivered by hand,
+      by mail or by email to the other party at its last known address.
+  - id: cba-term
+    title: Term of Agreement
+    text: >-
+      This Agreement shall remain in effect until the expiry date set out above and shall
+      continue in force from year to year thereafter unless either party gives written notice
+      to bargain in accordance with the applicable labour relations legislation.
+  - id: cba-no-strike
+    title: No Strike or Lockout
+    text: >-
+      There shall be no strike or lockout during the term of this Agreement.
+  - id: cba-gender
+    title: Gender and Number
+    text: >-
+      Wherever the singular or a particular gender is used in this Agreement, it shall be
+      read as including the plural or any gender where the context so requires.

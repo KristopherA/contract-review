@@ -1,4 +1,4 @@
-"""Synthetic layout corpus (drafts 5-10). Each case: page texts -> expected tree/facts."""
+"""Synthetic layout corpus (drafts 5-11). Each case: page texts -> expected tree/facts."""
 FF = "\n\f\n"
 HDRS = ["Collective Agreement 2024-2027.", "Subject to Article 30 Ratification",
         "This Agreement shall be read with the Pension Plan."]
@@ -94,9 +94,29 @@ for where in ("top", "bottom"):
              obligations=4)
 case("header on 9 of 10 pages", arts(10, f=lambda k: {"top": [PENSION]} if k != 7 else {}), tree_art(10),
      amounts=money(10), gone=["Pension"], obligations=10)
-case("bottom modal sentence on 9 of 10 pages kept",
+# draft 11: only body pages count. A bottom modal sentence missing from one BODY page is
+# kept (9 of 10 body pages); with a cover page and the line on all 9 body pages it is dropped.
+case("bottom modal sentence on 9 of 10 body pages kept (one body page lacks it)",
      arts(10, f=lambda k: {"bottom": ["The Employer shall post this Agreement."]} if k != 7 else {}),
      tree_art(10), amounts=money(10), keep=["shall post this Agreement"], obligations=19)
+COVER = "COLLECTIVE AGREEMENT\nBetween\nSample Employer\nand\nSample Union\n2024 - 2027"
+for txt in (PENSION + ".", PENSION):
+    case(f"cover page + Pension {'with' if txt.endswith('.') else 'without'} period on every body page",
+         doc(COVER, *(art(k, bottom=[txt]) for k in range(1, 10))), tree_art(9), amounts=money(9),
+         gone=["Pension"], obligations=9)
+case("cover page + bottom modal sentence on every body page dropped",
+     doc(COVER, *(art(k, bottom=["The Employer shall post this Agreement."]) for k in range(1, 10))),
+     tree_art(9), amounts=money(9), gone=["shall post this Agreement"], obligations=9)
+case("cover + TOC pages + Pension footer on every body page",
+     doc(COVER, "CONTENTS\nARTICLE 1 PURPOSE ..... 3\nARTICLE 2 WAGES ..... 4",
+         *(art(k, bottom=[PENSION + "."]) for k in range(1, 7))), tree_art(6), amounts=money(6),
+     gone=["Pension"], obligations=6)
+case("Pension footer on every other page (odd pages only) dropped",
+     arts(10, f=lambda k: {"bottom": [PENSION + "."]} if k % 2 else {}), tree_art(10), amounts=money(10),
+     gone=["Pension"], obligations=10)
+case("bottom modal sentence on 5 of 5 pages dropped",
+     arts(5, f=lambda k: {"bottom": ["The Employer shall post this Agreement."]}), tree_art(5),
+     amounts=money(5), gone=["shall post this Agreement"], obligations=5)
 case("2% on 3/3",
      doc(*(f"ARTICLE {n}: {NAMES[n]}\n{n}.01 Intro text.\nIncrease of 2% applies." for n in (1, 2, 3))),
      tree_intro(3), keep=["2%"])
@@ -138,3 +158,36 @@ case("annex followed by main body ('1. TITLE' with TOC)",
 case("WAGE GRID title under untitled appendix",
      "ARTICLE 1: PURPOSE\n1.01 Purpose text.\nAPPENDIX A\nWAGE GRID\nStep 1 $20.00 per hour\n",
      [("1", "PURPOSE"), ("Appendix A", "WAGE GRID")], amounts=[("$20.00", "Appendix A")])
+case("no-TOC schedule with a numbering gap resumes the body",
+     "1. PURPOSE\nPurpose text here.\n2. WAGES\nWage text here.\nSCHEDULE A - RATES\n1. RATES\nRate text.\n"
+     "3. HOURS\nThe Employer shall pay $7.00 per shift.\n",
+     [("1", "PURPOSE"), ("2", "WAGES"), ("Schedule A", "RATES"), ("Schedule A 1", "RATES"), ("3", "HOURS")],
+     amounts=[("$7.00", "§3")])
+
+# --- repeated headings of the open article ---
+case("'ARTICLE 2: WAGES' repeated atop each of its pages",
+     doc(art(1), "ARTICLE 2: WAGES\n2.01 The Employer shall pay $20.00 per hour.",
+         "ARTICLE 2: WAGES\n2.02 The Employer shall pay $25.00 per hour of overtime.",
+         "ARTICLE 2: WAGES\n2.03 Pay is issued every second week.", art(3)),
+     tree_art(3), amounts=[("$10.00", "§1.01"), ("$20.00", "§2.01"), ("$25.00", "§2.02"), ("$30.00", "§3.01")],
+     gone_lines=["ARTICLE 2: WAGES"])
+for cont in ("ARTICLE 2 - continued", "ARTICLE 2: WAGES (cont'd)", "ARTICLE 2 (Continued)"):
+    case(f"'{cont}' at a page top",
+         doc(art(1), "ARTICLE 2: WAGES\n2.01 The Employer shall pay $20.00 per hour.",
+             f"{cont}\n2.02 The Employer shall pay $25.00 per hour of overtime.", art(3)),
+         tree_art(3), amounts=[("$10.00", "§1.01"), ("$20.00", "§2.01"), ("$25.00", "§2.02"), ("$30.00", "§3.01")],
+         gone=["ontinued", "cont'd"])
+
+# --- letters of understanding ---
+case("LOU with a Re: line after the articles",
+     "ARTICLE 1: PURPOSE\n1.01 Purpose text.\nARTICLE 2: WAGES\n2.01 The Employer shall pay $20.00 per hour.\n"
+     "LETTER OF UNDERSTANDING #1\nBETWEEN\nSample Employer\nAND\nSample Union\nRe: Shift Trades\n"
+     "The parties agree that employees may trade shifts with $0.00 cost to the Employer.\n",
+     [("1", "PURPOSE"), ("2", "WAGES"), ("Letter of Understanding 1", "Shift Trades")],
+     amounts=[("$20.00", "§2.01"), ("$0.00", "Letter of Understanding 1")])
+case("two untitled letters of understanding stay separate",
+     "ARTICLE 1: PURPOSE\n1.01 Purpose text.\nLETTER OF UNDERSTANDING\nThe Employer shall pay $5.00 per meal.\n"
+     "LETTER OF UNDERSTANDING\nThe Employer shall pay $6.00 per kilometre.\n",
+     [("1", "PURPOSE"), ("Letter of Understanding", "The Employer shall pay $5.00 per…"),
+      ("Letter of Understanding (2)", "The Employer shall pay $6.00 per…")],
+     amounts=[("$5.00", "Letter of Understanding"), ("$6.00", "Letter of Understanding (2)")])

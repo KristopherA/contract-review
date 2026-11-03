@@ -9,7 +9,7 @@ from . import boilerplate as bp
 from . import facts as fx
 from .sections import Section, cite, label
 
-FACT_KEYS = ("amounts", "percentages", "durations", "dates", "deadlines", "obligations")
+FACT_KEYS = ("amounts", "percentages", "durations", "dates", "deadlines", "obligations", "definitions")
 
 
 def build(sections: list[Section], library: dict | None, threshold: float | None = None) -> dict:

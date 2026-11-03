@@ -6,6 +6,8 @@ folds only if, compared with the library clause:
   * similarity (numbers kept) >= threshold (default 95), and
   * the sets of numbers/amounts are identical, and
   * the sets of negation/exception words are identical, and
+  * clause labels at line starts ("12.01 ") are removed first; numbers inside the
+    text still count, and
   * the word sequences, compared in order with only "hereby" ignored, are
     identical. So only whitespace, punctuation, case and "hereby" may differ
     ("a" -> "the" does not fold); "or"->"and", "all"->"any" or swapping who
@@ -106,8 +108,14 @@ def load_library(path: str | Path | None = None) -> dict:
     return {"threshold": thr, "clauses": clauses}
 
 
+# "12.01 " clause labels at line starts are numbering, not content: without this the
+# numbers guard refused every real section ("12.01" is never in the library text)
+CLAUSE_LABEL = re.compile(r"(?m)^\s*\(?\d{1,3}(?:\.\d{1,3}){1,4}\)?[.:]?[ \t]+")
+
+
 def match(section_text: str, title: str, library: dict, threshold: float | None = None):
     """Return (clause_id, score) of the best safe match at/above threshold, else None."""
+    section_text = CLAUSE_LABEL.sub("", section_text)
     best = None
     for c in library["clauses"]:
         thr = float(c.get("threshold", threshold if threshold is not None else library["threshold"]))

@@ -18,6 +18,8 @@ import re
 from dataclasses import asdict, dataclass, field
 
 KW = r"(?:article|section|clause|part)"
+# Heading numbers are limited to \d{1,3} per level (articles 1-999, clauses up to 999.999...)
+# and roman numerals up to 6 letters; a 4+ digit number is never read as a heading.
 HEADING = re.compile(
     rf"^(?:(?P<kw>{KW})\s+)?"
     r"(?P<num>\d{1,3}(?:\.\d{1,3}){0,4}|[IVXLC]{1,6})"
@@ -27,7 +29,7 @@ HEADING = re.compile(
 # annexes start their own top-level block: "LETTER OF UNDERSTANDING #2 - Title", "APPENDIX A"
 ANNEX = re.compile(
     r"^(?P<kw>letter\s+of\s+understanding|letter\s+of\s+intent|memorandum\s+of\s+(?:agreement|understanding)"
-    r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?(?P<id>[A-Z]{1,2}|\d{1,3}|[IVX]{1,5})\b)?"
+    r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?[\x22\x27\u201c]?(?P<id>(?-i:[A-Z0-9]{1,3}|[IVX]{1,5}))[\x22\x27\u201d]?(?=[\s\-–—:.]|$))?"
     r"\s*(?:[-–—:.]\s*)?(?P<rest>.{0,200})$", re.I)
 MAX_LINE = 2000  # longer lines are cut into chunks before any regex runs (bounded runtime)
 TOC_TITLE = re.compile(r"^(?:table\s+of\s+)?contents$|^(?:numerical\s+|alphabetical\s+|subject\s+)?index$", re.I)
@@ -36,7 +38,10 @@ EDGE = 3  # header/footer candidates: first and last EDGE non-empty lines of eac
 GLUED_PAGE = re.compile(r"^[-–—]\s*\d{1,4}\s*[-–—]?\s*(?=(?:article|section|schedule|appendix|part)\b|\d+\.\d)", re.I)
 # only explicit page-number forms are dropped anywhere: "- 7 -", "Page 7", "Page 7 of 40"
 PAGE_LINE = re.compile(r"^(?:[-–—]\s*\d{1,4}\s*[-–—]|page\s+\d{1,4}(?:\s+of\s+\d{1,4})?)$", re.I)
-LONE_NUM = re.compile(r"^\d{1,4}$")
+LONE_NUM = re.compile(r"^(?P<n>\d{1,4})$")
+PAGE_NUM = re.compile(r"^(?:[-–—]\s*(?P<n>\d{1,4})\s*[-–—]|page\s+(?P<m>\d{1,4})(?:\s+of\s+\d{1,4})?)$", re.I)
+MAX_PAGE_OFFSET = 6  # printed page number may differ from the PDF page index by this much
+BODY_MARK = re.compile(r"[$%€£]|\b(?:shall|must|may|will|agrees?)\b", re.I)
 LIST_ITEM = re.compile(r"^\(?(?:[a-z]{1,2}|[ivxlc]{1,6}|\d{1,2})\)\s")  # (a) a) (iv) 1)
 # "3 days", "7.5 hours": a number followed by a lowercase unit is not a heading ("8 HOURS OF WORK" can be)
 UNIT_START = re.compile(r"^(?:[Dd]ays?|[Hh]ours?|[Ww]eeks?|[Mm]onths?|[Yy]ears?|%|percent|per\b|x\b)")
@@ -219,10 +224,12 @@ def _chunks(line: str) -> list[str]:
 def _clean_lines(text: str) -> list[str]:
     """Normalise lines, drop page furniture, keep everything else.
 
-    Dropped: explicit page numbers ("- 7 -", "Page 7 of 40"); a bare number that is the
-    first or last line of a page when those numbers run in sequence across >=2 pages;
-    a header/footer line repeated at the top or bottom of >=3 pages (or every page when
-    there are two). A bare number inside a page ("1500") is body text and is kept."""
+    Dropped: explicit page numbers ("- 7 -", "Page 7 of 40") anywhere; a bare number at a
+    page edge when it equals the page index plus a small offset on >=3 pages (explicit
+    forms count toward that run); a header/footer repeated at the top or bottom of >=3
+    pages (both pages of a 2-page file), compared exactly except for the page number.
+    Kept: a bare number inside a page ("1500"), edge numbers that don't track the page
+    ("1500/1501/1502"), and any edge line with $, %, or shall/must/may/will."""
     pages = [[_squash(x) for x in pg.split("\n")] for pg in text.split("\f")]
     drop: set[tuple[int, int]] = set()
     edges = []  # (page, line index, text) for first/last non-empty lines
@@ -230,21 +237,40 @@ def _clean_lines(text: str) -> list[str]:
         idx = [i for i, x in enumerate(pg) if x]
         for i in set(idx[:EDGE] + idx[-EDGE:]):
             edges.append((p, i, pg[i]))
+    # 1) page numbers: bare "7", "- 7 -" or "Page 7 of 40" at a page edge whose value is the
+    #    page index plus a small constant offset (front matter) on >= 3 pages.
+    pn = []  # (page, line index, number, explicit form?)
+    for p, i, t in edges:
+        m = LONE_NUM.match(t) or PAGE_NUM.match(t)
+        if m:
+            pn.append((p, i, int(m.group("n") or m.groupdict().get("m")), not LONE_NUM.match(t)))
+    by_off: dict[int, set] = {}
+    for p, i, n, _ in pn:
+        if abs(n - (p + 1)) <= MAX_PAGE_OFFSET:
+            by_off.setdefault(n - (p + 1), set()).add(p)
+    offs = {k for k, ps in by_off.items() if len(ps) >= 3}
+    for p, i, n, _ in pn:
+        if n - (p + 1) in offs:
+            drop.add((p, i))
+    # 2) running headers/footers: the same edge line on >= 3 pages (2 when there are two),
+    #    exact text except that the page number itself may differ. Lines with money, a
+    #    percentage or a modal verb are body text and never dropped; headings are kept.
     if len(pages) >= 2:
-        nums = [(p, i, int(t)) for p, i, t in edges if LONE_NUM.match(t)]
-        offsets: dict[int, list] = {}
-        for p, i, n in nums:
-            offsets.setdefault(n - p, []).append((p, i))
-        for hits in offsets.values():
-            if len({p for p, _ in hits}) >= 2:
-                drop.update(hits)
-        counts: dict[str, set] = {}
-        for p, i, t in edges:
-            if not LONE_NUM.match(t):
-                counts.setdefault(re.sub(r"\d+", "#", t), set()).add(p)
+        def keys(p, t):
+            ks = {(t, None)}
+            for k in offs | set(range(-MAX_PAGE_OFFSET, MAX_PAGE_OFFSET + 1)):
+                n = p + 1 + k
+                if n > 0 and re.search(rf"(?<!\d){n}(?!\d)", t):
+                    ks.add((re.sub(rf"(?<![\d$.,]){n}(?![\d.,%])", "#", t), k))
+            return ks
+        counts: dict[tuple, set] = {}
+        cand = [(p, i, t) for p, i, t in edges if (p, i) not in drop and not BODY_MARK.search(t)]
+        for p, i, t in cand:
+            for key in keys(p, t):
+                counts.setdefault(key, set()).add(p)
         need = 3 if len(pages) >= 3 else 2
-        for p, i, t in edges:
-            if len(counts.get(re.sub(r"\d+", "#", t), ())) >= need and not _classify(t):
+        for p, i, t in cand:
+            if any(len(counts[k]) >= need for k in keys(p, t)) and not _classify(t):
                 drop.add((p, i))
     out = []
     for p, pg in enumerate(pages):
@@ -269,6 +295,8 @@ VERBISH = re.compile(r"\b(?:shall|will|may|must|is|are|was|were|has|have|expires
 def _real_title(title: str, lines: list[str], i: int) -> bool:
     """A clause title must not continue as a sentence on the next line and should read as a
     heading: upper case, or most longer words capitalised, not opening like a sentence."""
+    if re.search(r"[$%€£]", title):
+        return False  # "1.01 Grade 1 $1,500.00": a wage row, not a title
     j = _next_nonempty(lines, i)
     if j < len(lines) and lines[j][:1].islower():
         return False
@@ -353,6 +381,11 @@ def split_sections(text: str) -> list[Section]:
                     title = rm[1].rstrip(".:"); break
                 if _classify(lines[k]):
                     break
+            j = _next_nonempty(lines, i)
+            if not title and j < len(lines) and lines[j].isupper() and title_like(lines[j]) \
+                    and not _classify(lines[j]) and not re.search(r"[$%]", lines[j]) \
+                    and not re.match(r"^(?:between|and|by|of|among|re)\b", lines[j], re.I):
+                title = lines[j].rstrip(".:"); lines[j] = ""  # "APPENDIX A" / "WAGE GRID"
         if kind == "annex":
             seen_annex[num] = seen_annex.get(num, 0) + 1
             if seen_annex[num] > 1 or any(h["num"] == num for h in heads):

@@ -2,6 +2,7 @@
 negated modals (B3), --summaries validation, and a pdftotext run over a multi-page CBA.
 All text here is synthetic."""
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -74,11 +75,11 @@ def test_page_furniture_forms_are_dropped():
 
 def test_repeated_running_header_and_sequential_page_numbers_dropped():
     names = ["PURPOSE", "WAGES", "HOURS", "LEAVE"]
-    pages = [f"SAMPLE HEADER 2030\nARTICLE {n}: {names[n - 1]}\n{n}.01 Text of clause {n}.\n{n + 10}"
+    pages = [f"SAMPLE HEADER 2030\nARTICLE {n}: {names[n - 1]}\n{n}.01 Text of clause {n}.\n{n}"
              for n in range(1, 5)]
     body = _body(split_sections("\n\f\n".join(pages)))
     assert "SAMPLE HEADER" not in body
-    assert not any(str(n + 10) in body.split() for n in range(1, 5))
+    assert not re.search(r"^\d+$", body, re.M)
     assert "Text of clause 3" in body
     assert [s.number for s in split_sections("\n\f\n".join(pages))] == ["1", "2", "3", "4"]
 

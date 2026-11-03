@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -33,7 +32,6 @@ def _secs(path, backend):
 
 MAX_SUMMARY_FILE = 1_000_000  # bytes
 MAX_SUMMARY_CHARS = 2000      # per entry
-_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>#|~])")
 
 
 def _load_summaries(path, known_ids, what="id"):
@@ -48,6 +46,8 @@ def _load_summaries(path, known_ids, what="id"):
         data = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{p.name}: not valid JSON ({exc.msg})") from exc
+    except RecursionError as exc:
+        raise ValueError(f"{p.name}: JSON nested too deeply") from exc
     if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
         raise ValueError(f"{p.name}: summaries must be a JSON object of {what} -> string")
     out = {}
@@ -58,7 +58,7 @@ def _load_summaries(path, known_ids, what="id"):
         line = " ".join(v.split())
         if len(line) > MAX_SUMMARY_CHARS:
             line = line[:MAX_SUMMARY_CHARS - 1] + "…"
-        out[k] = _MD_SPECIAL.sub(r"\\\1", line)
+        out[k] = report.md_escape(line)
     return out
 
 
@@ -112,7 +112,12 @@ def main(argv=None) -> int:
                 ap.error("evolve needs at least two versions")
             vs = [(Path(f).name, _secs(f, a.pdf_backend)) for f in a.files]
             r = evolve(vs, a.section, a.match_threshold)
-            summ = Path(a.summary_file).read_text(encoding="utf-8").strip() if a.summary_file else None
+            summ = None
+            if a.summary_file:
+                sp = Path(a.summary_file)
+                if sp.stat().st_size > MAX_SUMMARY_FILE:
+                    raise ValueError(f"{sp.name}: summary file larger than {MAX_SUMMARY_FILE // 1000} KB")
+                summ = sp.read_text(encoding="utf-8")[:4 * MAX_SUMMARY_CHARS]  # escaped in the report
             notes = _load_summaries(a.notes, {n for n, _ in vs}, "version")
             _emit(r, a.format, lambda: report.evolution_markdown(r, summ, notes))
     except (ExtractionError, ValueError, OSError) as exc:

@@ -33,6 +33,7 @@ MODAL = re.compile(rf"\b(?:(?P<no>{PROHIBIT})|(?P<right>{RIGHT})|(?P<duty>{DUTY}
 SENT = re.compile(r"(?<=[.;])\s+(?=[A-Z(])(?<!\d\.\s)|\s+(?=\((?:[a-z]{1,2}|[ivx]{1,5})\)\s)")
 MAX_LEN = 160
 MAX_CHUNK = 2000
+OVERLAP = 200  # chunks overlap; _dedupe_facts drops the repeats
 
 
 def _short(s: str) -> str:
@@ -60,6 +61,8 @@ def obligation(sentence: str) -> dict | None:
     before = sentence[: m.start()].strip(" ,")
     who = re.split(r"[,;:]|\b(?:if|when|where|unless|and)\b", before)[-1].strip()
     who = re.sub(r"^\(?[a-z0-9ivx]{1,4}[.)]\s*", "", who).strip()
+    if re.match(r"^(?:nothing|no\s+(?:provision|term|clause|article)|neither)\b", who, re.I):
+        return None  # "Nothing shall prevent ..." is a saving clause, not an obligation of "Nothing"
     kind = "prohibition" if m["no"] else "right" if m["right"] else "obligation"
     return {"kind": kind, "who": who[-60:] or "—", "text": _short(sentence)}
 
@@ -71,28 +74,48 @@ def extract(parts: list[tuple[str, str]]) -> dict:
         cite = cite_of(num)
         flat = re.sub(r"\s+", " ", text)
         flat = re.sub(r"(?<=[a-z])- (?=[a-z])", "-", flat)  # re-join hyphens broken at line wraps (linear)
-        for chunk in _chunks(flat):
-            _scan(chunk, cite, out)
+        prev_end = 0
+        for start, end, last in _chunks(flat):
+            # a fact is taken from the chunk where it ends past the previous cut (no repeats);
+            # a sentence running into a cut is left to the next, overlapping chunk
+            head_cut = start > 0 and flat[:start].rstrip()[-1:] not in ".;:"
+            _scan(flat[start:end], cite, out, prev_end - start, None if last else end - start, head_cut)
+            prev_end = end
     return _dedupe_facts(out)
 
 
-def _chunks(flat: str) -> list[str]:
-    """Cut text into <= MAX_CHUNK pieces at sentence or word boundaries before any regex."""
-    out = []
-    while len(flat) > MAX_CHUNK:
-        cut = max(flat.rfind(". ", 0, MAX_CHUNK), flat.rfind("; ", 0, MAX_CHUNK))
+def _chunks(flat: str) -> list[tuple[int, int, bool]]:
+    """(start, end, is_last) windows of <= MAX_CHUNK chars, cut at sentence or word
+    boundaries, each starting ~OVERLAP chars before the previous cut."""
+    out, start = [], 0
+    while len(flat) - start > MAX_CHUNK:
+        win = flat[start:start + MAX_CHUNK]
+        cut = max(win.rfind(". "), win.rfind("; "))
         if cut < MAX_CHUNK // 2:
-            cut = flat.rfind(" ", 0, MAX_CHUNK)
-        cut = cut + 1 if cut >= MAX_CHUNK // 2 else MAX_CHUNK
-        out.append(flat[:cut]); flat = flat[cut:].lstrip()
-    return out + [flat]
+            cut = win.rfind(" ")
+        cut = start + (cut + 1 if cut >= MAX_CHUNK // 2 else MAX_CHUNK)
+        out.append((start, cut, False))
+        back = flat.rfind(" ", cut - OVERLAP, cut)
+        start = back + 1 if back > start else cut
+    return out + [(start, len(flat), True)]
 
 
-def _scan(flat: str, cite: str, out: dict) -> None:
+def _scan(flat: str, cite: str, out: dict, keep_from: int = 0, tail: int | None = None,
+          head_cut: bool = False) -> None:
+    """Scan one chunk. Only matches ending at/after `keep_from` (the previous cut) and before
+    `tail` (this chunk's cut) are kept, so overlapping chunks report each fact once."""
+    def ok(a, b):  # match span [a, b) in this chunk
+        return b >= keep_from and (tail is None or b < tail)
     for key, rx in (("amounts", MONEY), ("percentages", PERCENT), ("durations", DURATION), ("dates", DATE)):
-        out[key] += [{"value": v.group(0).strip(), "cite": cite} for v in rx.finditer(flat)]
-    out["deadlines"] += [{"text": _short(d.group(0)), "cite": cite} for d in DEADLINE.finditer(flat)]
-    for snt in sentences(flat):
+        out[key] += [{"value": v.group(0).strip(), "cite": cite} for v in rx.finditer(flat) if ok(*v.span())]
+    out["deadlines"] += [{"text": _short(d.group(0)), "cite": cite} for d in DEADLINE.finditer(flat) if ok(*d.span())]
+    pos = 0
+    for n, snt in enumerate(sentences(flat)):
+        a = flat.find(snt, pos); a = pos if a < 0 else a; b = a + len(snt); pos = b
+        if b <= keep_from or (n == 0 and head_cut):
+            continue  # seen in the previous chunk, or a fragment cut at its start
+        if tail is not None and b >= tail - 1 and snt.rstrip()[-1:] not in ".;:":
+            continue  # runs into the cut; the next chunk sees it whole
         ob = obligation(snt)
         if ob:
             out["obligations"].append({**ob, "cite": cite})

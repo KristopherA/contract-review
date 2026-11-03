@@ -3,6 +3,23 @@ from __future__ import annotations
 
 import re
 
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>#|~&!])")
+_AUTOLINK = re.compile(r"(?:https?://|ftp://|www\.)\S+|\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b", re.I)
+
+
+def md_escape(text: str) -> str:
+    """One line of model-written text, safe inside Markdown and tables: whitespace
+    collapsed, specials (incl. & and |) backslash-escaped, and URLs/emails shown as
+    code spans so they never become live links."""
+    text = " ".join(text.split())
+    out, pos = [], 0
+    for m in _AUTOLINK.finditer(text):
+        out.append(_MD_SPECIAL.sub(r"\\\1", text[pos:m.start()]))
+        out.append("`" + m.group(0).replace("`", "'") + "`")
+        pos = m.end()
+    out.append(_MD_SPECIAL.sub(r"\\\1", text[pos:]))
+    return "".join(out)
+
 from .diffing import render_word_diff
 from .sections import cite
 
@@ -40,7 +57,7 @@ def evolution_markdown(result, summary=None, notes=None) -> str:
     notes = notes or {}
     lines = [f"# Evolution of “{result['query']}”", "", NOTE]
     if summary:
-        lines += ["## Summary", "", summary, ""]
+        lines += ["## Summary", "", md_escape(summary), ""]
     lines += ["## Timeline", "", "| Version | Clause | Status | Note |", "|---|---|---|---|"]
     for e in result["timeline"]:
         cl = _lbl(e.get("section")) if e["present"] else "—"

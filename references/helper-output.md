@@ -17,20 +17,27 @@
 `key_facts` = `{amounts, percentages, durations, dates: [{value, cite}], deadlines:
 [{text, cite}], obligations: [{kind: obligation|prohibition|right, who, text, cite}]}`.
 Facts are regex-based, no model, and each line is capped at 2000 chars so matching stays
-linear. A sentence with `shall not / must not / may not / will not / cannot` is a
+linear; chunks overlap by ~200 chars and each fact is reported once. "Nothing shall
+prevent…" saving clauses are not listed as obligations. A sentence with `shall not / must not / may not / will not / cannot` is a
 prohibition. `--summaries FILE` (JSON `{section id: string}`, max 1 MB) adds a
 `**Summary:**` line per section in Markdown; off by default. Values are collapsed to
-one line, capped at 2000 chars and Markdown-escaped; unknown ids go to stderr as
-warnings; any other shape exits 2. `diff --summaries` and `evolve --notes` follow the same rules.
+one line, capped at 2000 chars and Markdown-escaped (including `&`; URLs and emails
+become code spans, never links); too-deep JSON exits 2; unknown ids go to stderr as
+warnings; any other shape exits 2. `diff --summaries` and `evolve --notes` follow the same rules; `evolve --summary-file` is escaped the same way.
 Sections: only `ARTICLE/SECTION/CLAUSE/PART N`, `N` and `N.NN` headings count, plus
 annexes (`LETTER OF UNDERSTANDING`, `APPENDIX A`, `SCHEDULE 1`, memorandum, addendum,
 annex) which start their own top-level block; an untitled annex takes its title from a
 `Re:` line. Clause numbers inside an annex are scoped to it (`Appendix A 1.01`, cited
 `Appendix A, §1.01`), so a repeated `1.01` is not a duplicate. TOC entries (dot
 leaders, trailing page numbers, a CONTENTS/INDEX block) and `(a)`/`(i)`/`1.` list
-items stay out. Page furniture is dropped: `- N -` and `Page N of M` lines, bare
-numbers at the top/bottom of pages that run in sequence, and lines repeated (digits
-ignored) at the top/bottom of 3+ pages. A bare number inside a page (`1500`) is kept.
+items stay out. Page furniture is dropped: `- N -` and `Page N of M` lines; bare
+numbers at the top/bottom of pages that equal the page index plus a small offset (≤6)
+on 3+ pages (explicit forms count toward the run); and lines repeated at the top/bottom
+of 3+ pages, compared exactly except for the page number. Kept: a bare number inside a
+page (`1500`), edge numbers that don't track the page, and any edge line with `$`, `%`
+or shall/must/may/will. Annex ids may be quoted (`SCHEDULE "B" - BENEFITS`); an
+upper-case line right under an untitled annex (`APPENDIX A` / `WAGE GRID`) is its title.
+A clause "title" containing `$` or `%` is treated as body, so wage rows keep amounts.
 PDFs go through `pdftotext -layout` so two-column clause number/title layouts stay on one line. A clause number must belong to the current article; an untitled
 `N.NN` clause is merged into its article as a cited part.
 `boilerplate_folded[]` = `{section, id, clause, score}`. Threshold: library `threshold`

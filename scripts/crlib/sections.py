@@ -14,6 +14,7 @@ Rules (deterministic, conservative):
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 
@@ -43,7 +44,12 @@ PAGE_NUM = re.compile(r"^(?:[-–—]\s*(?P<n>\d{1,4})\s*[-–—]|page\s+(?P<m>
 MAX_PAGE_OFFSET = 6  # printed page number may differ from the PDF page index by this much
 DIGITS = re.compile(r"\d{1,4}")
 HAS_DIGIT = re.compile(r"\d")
-# a repeated edge line that ends like a sentence or cites a clause is body text
+# share of pages on which an identical edge line is always page furniture
+ALWAYS_SHARE = 0.8
+# ...and at least this many pages: in a 2-3 page file "identical on every page" is weak
+# evidence (a clause per page can repeat), so those fall back to the majority rule
+ALWAYS_MIN = 4
+# a bottom-edge line repeated on fewer pages that ends like a sentence or cites a clause is body text
 KEEP_LINE = re.compile(r"[.;:?!][\"'\u201d)]?$|\b(?:article|section|clause)\s+\d", re.I)
 BODY_MARK = re.compile(r"[$%€£]|\b(?:shall|must|may|will|agrees?)\b", re.I)
 LIST_ITEM = re.compile(r"^\(?(?:[a-z]{1,2}|[ivxlc]{1,6}|\d{1,2})\)\s")  # (a) a) (iv) 1)
@@ -242,10 +248,13 @@ def _clean_lines(text: str) -> list[str]:
 
     1. Running headers/footers: an edge line (one of the first/last EDGE non-empty lines)
        identical, except for the page-number position, in the same edge slot on >=3 pages
-       and on at least half the pages. Those are dropped even
-       with modal words or $, unless the line ends like a sentence (. ; : ? !) or cites
-       Article/Section/Clause N, or is a heading. Repeats on a minority of pages (>=3) are
-       dropped only without $, %, a modal verb, sentence punctuation or a citation.
+       and on at least ALWAYS_SHARE (80%) of the pages, minimum ALWAYS_MIN (4) pages, is
+       always dropped. Below that, a
+       repeat on >=3 pages and at least half the pages is dropped even with modal words or
+       $, unless it is a heading or a bottom-edge line that ends like a sentence (. ; : ? !)
+       or cites Article/Section/Clause N (so 3 of 5 pages: kept at the bottom, dropped at
+       the top). Repeats on a minority of pages (>=3) are dropped unless they carry $, %
+       or a modal verb, or are a bottom-edge sentence/citation line.
     2. Page numbers: "- 7 -" / "Page 7 of 40" anywhere; a bare number at a page edge equal
        to the page index plus a constant offset (<= MAX_PAGE_OFFSET) on >=3 pages, with the
        explicit forms counting toward the run. Other numbers ("1500") are body text."""
@@ -275,12 +284,17 @@ def _clean_lines(text: str) -> list[str]:
             cand.append((p, i, t, keys))
             for key in keys:  # one edge slot per page, so a count is a page count
                 where[key] = where.get(key, 0) + 1
+        bottom = {(p, i) for p, i, slot, _ in edges if slot[0] == "bottom"}
+        always = max(ALWAYS_MIN, math.ceil(ALWAYS_SHARE * n_pages))
         for p, i, t, keys in cand:
             best = max(where[k] for k in keys)
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
-            if KEEP_LINE.search(t) or _classify(t):
-                continue  # "Subject to Article 12." / a heading is body text even when it repeats
+            if best >= always:
+                drop.add((p, i)); continue  # same slot on (nearly) every page: always furniture
+            top = (p, i) not in bottom  # on a short page a line can sit in both edges
+            if _classify(t) or (not top and KEEP_LINE.search(t)):
+                continue  # a heading, or a bottom-edge "Subject to Article 12." on some pages
             if best >= need and best * 2 >= n_pages:
                 drop.add((p, i))  # running header/footer on most pages
             elif best >= 3 and not BODY_MARK.search(t):
@@ -353,6 +367,7 @@ def split_sections(text: str) -> list[Section]:
     last_top = 0
     target = None  # heading dict that receives body lines
     block, block_is_annex = "", False
+    last_main = 0  # last main-body article number (outside annexes)
     in_annex = False  # inside an appendix / schedule / letter block
     seen_annex: dict[str, int] = {}  # current top-level block (article or annex)
     style_kw = sum(1 for ln in lines if re.match(rf"^{KW}\s+(\d+|[IVXLC]+)\b", ln, re.I)) >= 2
@@ -373,6 +388,9 @@ def split_sections(text: str) -> list[Section]:
                 toc_numbers.add(c[1])
             i += 1; continue
         c = _classify(line)
+        if c and c[0] == "top" and in_annex and not in_toc and last_main and c[2] == last_main + 1 \
+                and not style_kw:
+            in_annex = False; last_top = last_main  # "3. TITLE" after Article 2's annex: body resumes
         if c and c[0] == "top" and in_annex and not in_toc:
             # "1. DENTAL" inside Schedule C is a clause of that schedule, never a document
             # article: number and dedupe it within the annex block.
@@ -428,6 +446,8 @@ def split_sections(text: str) -> list[Section]:
                 title = lines[j].rstrip(".:"); i = j
         if kind in ("kw", "top") and level == 1:
             last_top = top
+            if not in_annex or kind == "kw":
+                last_main = top
         elif kind == "annex":
             last_top = 0  # clause numbering restarts inside an appendix / letter
         parent = next((h for h in reversed(heads) if h["level"] < level), None)

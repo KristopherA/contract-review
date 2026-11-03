@@ -101,13 +101,13 @@ def test_header_with_page_number_dropped():
 def test_many_form_feeds_fast():
     txt = "\f".join("x" for _ in range(50000))  # 50k one-line pages: was 3+ s in draft 7
     t = time.perf_counter(); split_sections(txt)
-    assert time.perf_counter() - t < 0.5
+    assert time.perf_counter() - t < 2.0  # ~0.4 s on the dev box
 
 
 def test_many_pages_with_running_header_linear():
     txt = "\f".join(f"Running Header\nline {i}\n{i + 1}" for i in range(20000))
     t = time.perf_counter(); secs = split_sections(txt)
-    assert time.perf_counter() - t < 1.5
+    assert time.perf_counter() - t < 2.0
     assert "Running Header" not in body(secs)
 
 

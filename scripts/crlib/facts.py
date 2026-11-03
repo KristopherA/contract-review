@@ -30,8 +30,13 @@ PROHIBIT = (r"shall\s+not|must\s+not|may\s+not|will\s+not|cannot|can\s+not|shall
 RIGHT = r"shall\s+be\s+entitled\s+to|is\s+entitled\s+to|are\s+entitled\s+to|may"
 DUTY = r"shall|must|will|is\s+required\s+to|are\s+required\s+to|agrees?\s+to"
 MODAL = re.compile(rf"\b(?:(?P<no>{PROHIBIT})|(?P<right>{RIGHT})|(?P<duty>{DUTY}))\b", re.I)
-SENT = re.compile(r"(?<=[.;])\s+(?=[A-Z(])(?<!\d\.\s)|\s+(?=\((?:[a-z]{1,2}|[ivx]{1,5})\)\s)")
+# no break after abbreviations: i.e. e.g. Art. No. s.
+SENT = re.compile(r"(?<=[.;])(?<!\bi\.e\.)(?<!\be\.g\.)(?<!\b[Aa]rt\.)(?<!\b[Nn]o\.)(?<!\bs\.)"
+                  r"\s+(?=[A-Z(])(?<!\d\.\s)|\s+(?=\((?:[a-z]{1,2}|[ivx]{1,5})\)\s)")
 MAX_LEN = 160
+# a leading cross-reference in a subject: "See Art. 5", "per Section 3.2", "Article 7"
+REF = re.compile(r"^(?:(?:see|per|under|pursuant to)\s+)?(?:art(?:icle)?|section|s|clause|no)\.?\s*"
+                 r"\d[\d.]*(?:\([a-z0-9]+\))*\.?\s*", re.I)
 MAX_CHUNK = 2000
 OVERLAP = 200  # windows of an over-long sentence overlap; _scan keeps one match per span
 
@@ -59,7 +64,11 @@ def obligation(sentence: str) -> dict | None:
     if not m:
         return None
     before = sentence[: m.start()].strip(" ,")
-    who = re.split(r"[,;:]|\b(?:if|when|where|unless|and)\b", before)[-1].strip()
+    # the subject is the last clause/noun phrase before the modal: cut at sentence or clause
+    # breaks ("See Art. 5. The Union" -> "The Union"), but not inside i.e./e.g./Art./No.
+    who = re.split(r"(?<!\bi\.e)(?<!\be\.g)(?<!\b[Aa]rt)(?<!\b[Nn]o)(?<!\bs)\.\s+(?=[A-Z(])|[,;:]"
+                   r"|\b(?:if|when|where|unless|and|that|which)\b", before)[-1].strip()
+    who = REF.sub("", who).strip()
     who = re.sub(r"^\(?[a-z0-9ivx]{1,4}[.)]\s*", "", who).strip()
     after = sentence[m.end():]
     negsubj = re.match(r"^(?:nothing|neither|no(?:ne)?\b)", who, re.I)

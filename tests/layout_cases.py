@@ -1,4 +1,4 @@
-"""Synthetic layout corpus (drafts 5-11). Each case: page texts -> expected tree/facts."""
+"""Synthetic layout corpus (drafts 5-13). Each case: page texts -> expected tree/facts."""
 FF = "\n\f\n"
 HDRS = ["Collective Agreement 2024-2027.", "Subject to Article 30 Ratification",
         "This Agreement shall be read with the Pension Plan."]
@@ -40,10 +40,11 @@ def a12(pages, n, where):
 CASES = []
 
 
-def case(name, text, tree, amounts=None, keep=(), gone=(), obligations=None, gone_lines=()):
-    """keep/gone: substrings of the section text; gone_lines: whole lines that must not remain."""
+def case(name, text, tree, amounts=None, keep=(), gone=(), obligations=None, gone_lines=(), clean=False):
+    """keep/gone: substrings of the section text; gone_lines: whole lines that must not remain;
+    clean: no HDRS furniture leaks into the text and no obligation comes from it."""
     CASES.append(dict(name=name, text=text, tree=tree, amounts=amounts, keep=list(keep), gone=list(gone),
-                      obligations=obligations, gone_lines=list(gone_lines)))
+                      obligations=obligations, gone_lines=list(gone_lines), clean=clean))
 
 
 def tree_intro(n):
@@ -86,12 +87,12 @@ for pages, n, where, kept in [((1, 2, 3), 3, "bottom", True), ((1, 2, 3), 5, "bo
 # --- running headers ---
 for where in ("top", "bottom"):
     case(f"three reviewer headers every page ({where})", arts(4, f=lambda k, w=where: {w: HDRS}), tree_art(4),
-         amounts=money(4), gone=["Collective Agreement 2024", "Article 30", "Pension"], obligations=4)
+         amounts=money(4), gone=["Collective Agreement 2024", "Article 30", "Pension"], obligations=4, clean=True)
 for where in ("top", "bottom"):
     for txt in (PENSION, PENSION + "."):
         case(f"Pension {'with' if txt.endswith('.') else 'without'} period every page ({where})",
              arts(4, f=lambda k, w=where, t=txt: {w: [t]}), tree_art(4), amounts=money(4), gone=["Pension"],
-             obligations=4)
+             obligations=4, clean=True)
 case("header on 9 of 10 pages", arts(10, f=lambda k: {"top": [PENSION]} if k != 7 else {}), tree_art(10),
      amounts=money(10), gone=["Pension"], obligations=10)
 # draft 11: only body pages count. A bottom modal sentence missing from one BODY page is
@@ -103,17 +104,17 @@ COVER = "COLLECTIVE AGREEMENT\nBetween\nSample Employer\nand\nSample Union\n2024
 for txt in (PENSION + ".", PENSION):
     case(f"cover page + Pension {'with' if txt.endswith('.') else 'without'} period on every body page",
          doc(COVER, *(art(k, bottom=[txt]) for k in range(1, 10))), tree_art(9), amounts=money(9),
-         gone=["Pension"], obligations=9)
+         gone=["Pension"], obligations=9, clean=True)
 case("cover page + bottom modal sentence on every body page dropped",
      doc(COVER, *(art(k, bottom=["The Employer shall post this Agreement."]) for k in range(1, 10))),
      tree_art(9), amounts=money(9), gone=["shall post this Agreement"], obligations=9)
 case("cover + TOC pages + Pension footer on every body page",
      doc(COVER, "CONTENTS\nARTICLE 1 PURPOSE ..... 3\nARTICLE 2 WAGES ..... 4",
          *(art(k, bottom=[PENSION + "."]) for k in range(1, 7))), tree_art(6), amounts=money(6),
-     gone=["Pension"], obligations=6)
+     gone=["Pension"], obligations=6, clean=True)
 case("plan sentence footer on every other page kept (odd/even rule is for running titles only)",
      arts(10, f=lambda k: {"bottom": [PENSION + "."]} if k % 2 else {}), tree_art(10), amounts=money(10),
-     keep=["Pension"])
+     keep=["Pension"], clean=True)
 case("clause on odd pages 1, 3, 5, 7 of 8 kept",
      arts(8, f=lambda k: {"bottom": ["The Employer shall pay the rate in Appendix A."]} if k % 2 else {}),
      tree_art(8), amounts=money(8), keep=["shall pay the rate in Appendix A"])
@@ -201,3 +202,23 @@ case("two untitled letters of understanding stay separate",
      [("1", "PURPOSE"), ("Letter of Understanding", "The Employer shall pay $5.00 per…"),
       ("Letter of Understanding (2)", "The Employer shall pay $6.00 per…")],
      amounts=[("$5.00", "Letter of Understanding"), ("$6.00", "Letter of Understanding (2)")])
+
+
+# --- alternating book footers: a sentence on odd pages, a title on even pages ---
+YEARS = "Collective Agreement 2024-2027"
+
+
+def alt_book(n):
+    return lambda k: {"bottom": [PENSION + "." if k % 2 else YEARS]}
+
+
+case("alternating book footers on 10 body pages dropped",
+     arts(10, f=alt_book(10)), tree_art(10), amounts=money(10), gone=["Pension", YEARS], obligations=10, clean=True)
+case("alternating book footers on 12 body pages dropped",
+     arts(12, f=alt_book(12)), tree_art(12), amounts=money(12), gone=["Pension", YEARS], obligations=12, clean=True)
+case("cover + alternating book footers on 11 body pages dropped",
+     doc(COVER, *(art(k, **alt_book(11)(k)) for k in range(1, 12))), tree_art(11), amounts=money(11),
+     gone=["Pension", YEARS], obligations=11, clean=True)
+case("alternating book footers, one odd page missing its line (80%), dropped",
+     arts(10, f=lambda k: {} if k == 3 else alt_book(10)(k)), tree_art(10), amounts=money(10),
+     gone=["Pension", YEARS], obligations=10, clean=True)

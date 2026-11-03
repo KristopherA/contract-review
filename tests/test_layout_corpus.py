@@ -1,4 +1,4 @@
-"""Table-driven layout corpus: every page-layout case from drafts 5-12 (tests/layout_cases.py).
+"""Table-driven layout corpus: every page-layout case from drafts 5-13 (tests/layout_cases.py).
 For each case the full section tree (ids, numbers, titles), the clause every fact cites,
 and the absence of leaked header/footer text are asserted."""
 import pytest
@@ -31,10 +31,20 @@ def test_layout_case(c):
         assert g not in lines, g
     if c["obligations"] is not None:
         assert len(f["obligations"]) == c["obligations"]
-    if "reviewer headers" in c["name"] or "Pension" in c["name"]:
-        assert not any("Pension" in o["text"] or "2024" in o["text"] for o in f["obligations"])
-        assert all(h.rstrip(".") not in text for h in HDRS)
+    if c["clean"]:
+        # furniture must not leak into obligations, except text the case deliberately keeps
+        leak = [w for w in ("Pension", "2024") if not any(w in k for k in c["keep"])]
+        assert not any(w in o["text"] for w in leak for o in f["obligations"])
+        assert all(h.rstrip(".") not in text for h in HDRS if not any(k in h for k in c["keep"]))
 
 
 def test_corpus_size():
-    assert len(CASES) >= 45
+    assert len(CASES) >= 49
+
+
+def test_clean_flag_is_set_on_every_furniture_case():
+    flagged = [c["name"] for c in CASES if c["clean"]]
+    assert len(flagged) >= 12
+    for c in CASES:
+        if "Pension" in c["name"] or "book footers" in c["name"] or "plan sentence" in c["name"]:
+            assert c["clean"], c["name"]

@@ -31,7 +31,7 @@ HEADING = re.compile(
 # annexes start their own top-level block: "LETTER OF UNDERSTANDING #2 - Title", "APPENDIX A"
 ANNEX = re.compile(
     r"^(?P<kw>letter\s+of\s+understanding|letter\s+of\s+intent|memorandum\s+of\s+(?:agreement|understanding)"
-    r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?[\x22\x27\u201c]?(?P<id>(?-i:[A-Z0-9]{1,3}|[IVX]{1,5}))[\x22\x27\u201d]?(?=[\s\-–—:.]|$))?"
+    r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?[\x22\x27\u201c]?(?P<id>(?-i:[A-Z0-9]{1,3}(?:-[A-Z0-9]{1,3})?|[IVX]{1,5}))[\x22\x27\u201d]?(?=[\s\-–—:.]|$))?"
     r"\s*(?:[-–—:.]\s*)?(?P<rest>.{0,200})$", re.I)
 # "ARTICLE 2 - continued", "ARTICLE 2: WAGES (cont'd)"
 CONTINUED = re.compile(r"^(.*?\S)[\s,:\-–—]*\(?\s*(?:continued|cont['’]?d\.?)\s*\)?$", re.I)
@@ -52,6 +52,7 @@ ALWAYS_SHARE = 0.8
 # ...and at least this many pages: in a 2-3 page file "identical on every page" is weak
 # evidence (a clause per page can repeat), so those fall back to the majority rule
 ALWAYS_MIN = 4
+ALT_SHARE = 0.8  # odd/even book pair: each line on 80% of its parity's pages
 SENT_END = re.compile(r"[.;?!][\"'\u201d)]?$")
 # a bottom-edge line repeated on fewer pages that ends like a sentence or cites a clause is body text
 KEEP_LINE = re.compile(r"[.;:?!][\"'\u201d)]?$|\b(?:article|section|clause)\s+\d", re.I)
@@ -286,12 +287,14 @@ def _clean_lines(text: str) -> list[str]:
     edge_at = {(p, i) for p, i, _, _ in edges}
     # body pages: a page with a full sentence of 4+ words outside the edge slots, or with
     # 2+ such sentences anywhere. Cover, title and TOC pages are left out of the counts.
-    body = set()
+    body, weak = set(), set()  # weak: any body sentence at all (for odd/even pairing)
     for p, pg in enumerate(pages):
         inner = sum(1 for i, x in enumerate(pg) if x and (p, i) not in edge_at and _body_line(x))
         anyw = sum(1 for x in pg if x and _body_line(x))
         if inner or anyw >= 2:
             body.add(p)
+        if anyw:
+            weak.add(p)
     n_body = len(body) or n_pages
     # 1) repeated headers/footers (checked first)
     if n_pages >= 2:
@@ -299,6 +302,11 @@ def _clean_lines(text: str) -> list[str]:
         where: dict[tuple, int] = {}
         par: dict[tuple, int] = {}  # (key, page parity) -> body pages
         n_par = [sum(1 for p in body if p % 2 == k) for k in (0, 1)] if body else [0, 0]
+        n_wpar = [sum(1 for p in weak if p % 2 == k) for k in (0, 1)]
+        raw: dict[tuple, int] = {}  # (slot, exact line, parity) -> weak body pages (book pairs)
+        for p, i, slot, t in edges:
+            if p in weak:
+                raw[(slot, t.rstrip(". "), p % 2)] = raw.get((slot, t.rstrip(". "), p % 2), 0) + 1
         cand = []  # (page, line, [keys]) computed once per edge line
         var: dict[tuple[int, int], list | None] = {}
         for p, i, slot, t in edges:
@@ -318,19 +326,29 @@ def _clean_lines(text: str) -> list[str]:
         always = max(ALWAYS_MIN, math.ceil(ALWAYS_SHARE * n_body))
         def _alt(k, q):  # on every body page of parity q, on under half of the other parity
             return par.get((k, q), 0) >= max(ALWAYS_MIN, n_par[q]) and par.get((k, 1 - q), 0) * 2 < n_par[1 - q]
-        alt_slots: dict[tuple, set] = {}  # (slot, parity) -> alternating line variants
+        alt_slots: dict[tuple, set] = {}  # (slot, parity) -> alternating running-title variants
         for p, i, t, keys in cand:
             if SENT_END.search(t) or BODY_MARK.search(t):
-                continue  # odd/even furniture is a running title, never a sentence, modal, $ or %
+                continue  # a lone odd/even line is a running title, never a sentence, modal, $ or %
             for k in keys:
                 for q in (0, 1):
                     if _alt(k, q):
                         alt_slots.setdefault((k[0], q), set()).add(k[1])
+        book: dict[tuple, set] = {}  # (slot, parity) -> exact lines on >= 80% of that parity
+        for (slot, t, q), n in raw.items():
+            if n >= max(3, math.ceil(ALT_SHARE * n_wpar[q])) and raw.get((slot, t, 1 - q), 0) * 2 < n_wpar[1 - q]:
+                book.setdefault((slot, q), set()).add(t)
+
+        def _paired(table, k):  # k alternates with a different line in the same slot
+            return any(k[1] in table.get((k[0], q), ()) and (table.get((k[0], 1 - q), set()) - {k[1]})
+                       for q in (0, 1))
         for p, i, t, keys in cand:
             best = max(where.get(k, 0) for k in keys)
-            # odd/even: only with a different alternating line on the other parity, same slot
-            alt = any(k[1] in alt_slots.get((k[0], q), ()) and (alt_slots.get((k[0], 1 - q), set()) - {k[1]})
-                      for k in keys for q in (0, 1))
+            # odd/even book furniture: two different lines alternating in one slot, each on >= 80%
+            # of its parity's pages, are both dropped whatever they say; a lone alternating line
+            # only as a running title with a partner (draft 12)
+            alt = any(_paired(book, (sl, t.rstrip(". "))) for sl in {k[0] for k in keys}) \
+                or any(_paired(alt_slots, k) for k in keys)
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
             if _classify(t):
@@ -597,7 +615,10 @@ def _dedupe(heads: list[dict]) -> list[dict]:
         prev = next((x for x in out if key(x) == key(h)), None)
         if prev is not None:
             if not empty:
-                prev["lines"] += [""] + h["lines"]; prev["parts"] += h["parts"]
+                have = {n for n, _ in prev["parts"]} | {x["num"] for x in out if x["block"] == prev["block"]}
+                # a restated article: a clause number seen already gets its own cite
+                prev["parts"] += [((f"{n} (restated)" if n in have else n), t) for n, t in h["parts"]]
+                prev["lines"] += [""] + h["lines"]
             if h["title"] and prev["title"] and h["title"].lower() != prev["title"].lower():
                 prev["title"] = f"{prev['title']} / {h['title']}"  # "ARTICLE 2" restated: keep both titles
             else:

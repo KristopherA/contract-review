@@ -34,16 +34,16 @@ PROHIBIT = (r"shall\s+not|must\s+not|may\s+not|will\s+not|cannot|can\s+not|shall
 RIGHT = r"shall\s+be\s+entitled\s+to|is\s+entitled\s+to|are\s+entitled\s+to|may"
 DUTY = r"shall|must|will|is\s+required\s+to|are\s+required\s+to|agrees?\s+to"
 MODAL = re.compile(rf"\b(?:(?P<no>{PROHIBIT})|(?P<right>{RIGHT})|(?P<duty>{DUTY}))\b", re.I)
-# no break after abbreviations: i.e. e.g. Art. No. s. Mr. Ms. Dr. Sec.
+# no break after abbreviations: i.e. e.g. Art. No. s. Mr. Ms. Dr. Sec. para. ss.
 SENT = re.compile(r"(?<=[.;])(?<!\bi\.e\.)(?<!\be\.g\.)(?<!\b[Aa]rt\.)(?<!\b[Nn]o\.)(?<!\bs\.)"
-                  r"(?<!\bMr\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\b[Ss]ec\.)"
+                  r"(?<!\bMr\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\b[Ss]ec\.)(?<!\b[Pp]ara\.)(?<!\b[Ss]s\.)"
                   r"\s+(?=[A-Z(])(?<!\d\.\s)|\s+(?=\((?:[a-z]{1,2}|[ivx]{1,5})\)\s)")
 MAX_LEN = 160
 # a leading cross-reference in a subject: "See Art. 5", "per Section 3.2", "Article 7"
 REF = re.compile(r"^(?:(?:see|per|under|pursuant to)\s+)?(?:art(?:icle)?|section|s|clause|no)\.?\s*"
                  r"\d[\d.]*(?:\([a-z0-9]+\))*\.?\s*", re.I)
 # a dot ending one of these abbreviations is not a clause break inside a subject
-ABBR_DOT = r"(?<!\bi\.e)(?<!\be\.g)(?<!\b[Aa]rt)(?<!\b[Nn]o)(?<!\bs)(?<!\bMr)(?<!\bMs)(?<!\bDr)(?<!\b[Ss]ec)"
+ABBR_DOT = r"(?<!\bi\.e)(?<!\be\.g)(?<!\b[Aa]rt)(?<!\b[Nn]o)(?<!\bs)(?<!\bMr)(?<!\bMs)(?<!\bDr)(?<!\b[Ss]ec)(?<!\b[Pp]ara)(?<!\b[Ss]s)"
 APPOSITIVE = re.compile(r"^(?:i\.e\.|e\.g\.|namely|including|being)\s", re.I)
 LEAD_PHRASE = re.compile(r"^(?:pursuant to|subject to|under|in accordance with|notwithstanding|despite|"
                          r"per|according to|for the purposes? of)\b", re.I)
@@ -54,6 +54,8 @@ DEFINITION = re.compile(r"^(?:\(?[a-z0-9]{1,4}[.)]\s*)?(?P<term>[\"\u201c']?[A-Z
                         r"is\s+defined\s+as|shall\s+be\s+defined\s+as)\b")
 # a second clause after a definition: ", and the ...", "; ", " and each ..."
 DEF_TAIL = re.compile(r"(?:;\s*|,?\s+(?:and|but)\s+(?=(?:the|an?|each|every|any|all|no|neither|nothing)\s))", re.I)
+# "... and shall be paid": a modal straight after "and" has no subject of its own
+DEF_BARE = re.compile(r",?\s+and\s+(?=(?:shall|must|will|may|is\s+required\s+to|are\s+required\s+to)\b)", re.I)
 MAX_WHO_WORDS = 8
 MAX_CHUNK = 2000
 OVERLAP = 200  # windows of an over-long sentence overlap; _scan keeps one match per span
@@ -142,7 +144,9 @@ def _int_value(toks: list[str]) -> float | None:
 PAIR = re.compile(rf"^(?P<w>{WORDNUM})\s*\((?P<n>\d+(?:\.\d+)?)\)", re.I)
 # "1.07", "3.01": decimal with a zero-led fraction reads as a clause number, not a quantity
 CLAUSE_NUM = re.compile(r"^\d{1,3}\.0\d")
-REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|s|clause|schedule|appendix)\.?|§)\s*\(?\s*$", re.I)
+REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|sub-?section|s|ss|clause|sub-?clause|paragraph|para|"
+                        r"subparagraph|item|schedule|appendix)\.?|§|\b\d{1,3}(?:\.\d{1,3}){1,4}(?:\([a-z0-9]{1,4}\))*)"
+                        r"\s*\(?\s*$", re.I)
 
 
 def _word_value(w: str) -> float | None:
@@ -245,7 +249,16 @@ def _scan(snt: str, cite: str, out: dict) -> None:
     if d:
         out["definitions"].append({**d, "cite": cite})
         # keep scanning: "A day means a calendar day and the Employer shall pay." also obliges
-        tail = DEF_TAIL.search(snt, DEFINITION.match(snt).end())
+        dend = DEFINITION.match(snt).end()
+        bare = DEF_BARE.search(snt, dend)
+        tail = DEF_TAIL.search(snt, dend)
+        if bare and not (tail and tail.start() < bare.start()):
+            # "Overtime means ... and shall be paid at 1.5 times": no subject of its own, so
+            # the defined term is the subject
+            ob = obligation(f"{d['term'].strip(chr(34) + chr(39) + '“”')} {snt[bare.end():]}")
+            if ob:
+                out["obligations"].append({**ob, "cite": cite})
+            return
         snt = snt[tail.end():] if tail else ""
     ob = obligation(snt) if snt else None  # MODAL is a fixed-word alternation: linear even on long sentences
     if ob:

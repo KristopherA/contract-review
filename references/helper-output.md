@@ -136,3 +136,12 @@ previous version, falling back to a title/number search.
 - An article restated with a new title merges into the first: titles are joined
   ("WAGES / HOURS OF WORK") and no sub-clause or text is dropped.
 - The no-TOC gap-resume rule prints a stderr warning naming the resumed heading.
+
+## Draft 13 rules
+
+- **Alternating book footers:** if two different plain lines share one slot and alternate by page parity, each on at least 80% of its own parity's body pages and on under half of the other parity's, both are dropped whatever they say. A lone odd-only or even-only line with no partner is still kept.
+- **Boilerplate labels:** a clause label is stripped before matching only if it follows the section's own numbering (12.xx in Article 12) and the numbers go up in order. A paragraph such as "30.5 Employees shall…" blocks the fold.
+- **Reference numbers:** after subsection, ss., sub-clause, paragraph, para., subparagraph, item, or a dotted clause number (12.01, 12.01(a)), a bracketed figure is a reference, not a duration.
+- **Subjectless clause after a definition:** "X means … and shall …" gives an obligation whose subject is the defined term.
+- **Restated article:** a repeated clause number in a merged restatement is cited as "N (restated)".
+- **Annex ids:** "APPENDIX A-1: SHIFT" is Appendix A-1 with the title SHIFT.

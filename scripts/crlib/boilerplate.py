@@ -109,15 +109,34 @@ def load_library(path: str | Path | None = None) -> dict:
 
 
 # a "12.01 " clause label is numbering, not content: without stripping it the numbers
-# guard refused every real section. Only at the start of the section or of a paragraph
-# (after a blank line) and only before a capital letter, so a "30.5 hours" line added
-# mid-paragraph keeps its number and still blocks the fold.
-CLAUSE_LABEL = re.compile(r"(\A|\n[ \t]*\n)[ \t]*\(?\d{1,3}(?:\.\d{1,3}){1,4}\)?[.:]?[ \t]+(?=[A-Z])")
+# guard refused every real section. A label is stripped only at the start of the section
+# or of a paragraph, before a capital letter, and only while the labels follow the
+# section's own numbering in order (12.01, 12.02 ... inside Article 12). A "30.5 Employees
+# shall ..." paragraph, or a label that goes backwards, keeps its number, so the numbers
+# guard blocks the fold.
+CLAUSE_LABEL = re.compile(r"(\A|\n[ \t]*\n)[ \t]*\(?(\d{1,3}(?:\.\d{1,3}){1,4})\)?[.:]?[ \t]+(?=[A-Z])")
 
 
-def match(section_text: str, title: str, library: dict, threshold: float | None = None):
+def strip_labels(text: str, number: str = "") -> str:
+    major = number.split(".")[0] if number and number[0].isdigit() else None
+    last: list[tuple[int, ...]] = []
+
+    def sub(m):
+        nums = m[2].split(".")
+        nonlocal major
+        if major is None:
+            major = nums[0]  # no section number given: the first label sets the numbering
+        key = tuple(int(x) for x in nums[1:])
+        if nums[0] != major or (last and key <= last[-1]):
+            return m[0]
+        last.append(key)
+        return m[1]
+    return CLAUSE_LABEL.sub(sub, text)
+
+
+def match(section_text: str, title: str, library: dict, threshold: float | None = None, number: str = ""):
     """Return (clause_id, score) of the best safe match at/above threshold, else None."""
-    section_text = CLAUSE_LABEL.sub(r"\1", section_text)
+    section_text = strip_labels(section_text, number)
     best = None
     for c in library["clauses"]:
         thr = float(c.get("threshold", threshold if threshold is not None else library["threshold"]))

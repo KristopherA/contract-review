@@ -15,7 +15,7 @@ FACT_KEYS = ("amounts", "percentages", "durations", "dates", "deadlines", "oblig
 def build(sections: list[Section], library: dict | None, threshold: float | None = None) -> dict:
     kept, folded = [], []
     for s in sections:
-        m = bp.match(s.text, s.title, library, threshold) if library and s.text else None
+        m = bp.match(s.text, s.title, library, threshold, number=s.number) if library and s.text else None
         if m:
             folded.append({"section": label(s), "id": s.id, "clause": m[0], "score": m[1]})
             continue

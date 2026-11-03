@@ -15,8 +15,13 @@ def md_escape(text: str) -> str:
     out, pos = [], 0
     for m in _AUTOLINK.finditer(text):
         out.append(_MD_SPECIAL.sub(r"\\\1", text[pos:m.start()]))
-        out.append("`" + m.group(0).replace("`", "'") + "`")
-        pos = m.end()
+        url = m.group(0)
+        tail = len(url) - len(url.rstrip(").,;:!?'\"]>"))
+        if tail:  # "(see https://x.org)." -> the ")." stays outside the span
+            url = url[:-tail]
+        # GFM splits table cells on "|" even inside code spans, so escape it there too
+        out.append("`" + url.replace("`", "'").replace("|", "\\|") + "`")
+        pos = m.start() + len(url)
     out.append(_MD_SPECIAL.sub(r"\\\1", text[pos:]))
     return "".join(out)
 

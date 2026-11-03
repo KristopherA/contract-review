@@ -132,6 +132,8 @@ and generate their PDF and DOCX fixtures at run time.
 ## Limitations
 
 - No OCR: scanned PDFs need a text layer.
+- Page numbers that differ from the PDF page index by more than 6 (long unnumbered front
+  matter) are not recognised as page furniture and stay in the text as bare numbers.
 - Section splitting expects numbered headings (`1.`, `1.1`, `Section 3`,
   `Article IV`) and upper-case annex headings. Unnumbered, multi-column body
   text or table-heavy layouts split poorly; a letter without a `Re:` line gets a

@@ -123,7 +123,7 @@ def test_deeply_nested_summaries_exit_2(tmp_path):
 def test_md_escape_ampersand_and_links():
     out = md_escape("A & B <i>x</i> see https://example.com/a_b or www.example.org, mail a@example.com ![x](y)")
     assert "\\&" in out and "\\<i\\>" in out and "\\!\\[x\\]" in out
-    assert "`https://example.com/a_b`" in out and "`www.example.org,`" in out and "`a@example.com`" in out
+    assert "`https://example.com/a_b`" in out and "`www.example.org`," in out and "`a@example.com`" in out
 
 
 def test_evolve_summary_file_is_escaped(tmp_path, fixtures):

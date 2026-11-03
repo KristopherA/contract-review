@@ -41,6 +41,10 @@ PAGE_LINE = re.compile(r"^(?:[-–—]\s*\d{1,4}\s*[-–—]|page\s+\d{1,4}(?:\s
 LONE_NUM = re.compile(r"^(?P<n>\d{1,4})$")
 PAGE_NUM = re.compile(r"^(?:[-–—]\s*(?P<n>\d{1,4})\s*[-–—]|page\s+(?P<m>\d{1,4})(?:\s+of\s+\d{1,4})?)$", re.I)
 MAX_PAGE_OFFSET = 6  # printed page number may differ from the PDF page index by this much
+DIGITS = re.compile(r"\d{1,4}")
+HAS_DIGIT = re.compile(r"\d")
+# a repeated edge line that ends like a sentence or cites a clause is body text
+KEEP_LINE = re.compile(r"[.;:?!][\"'\u201d)]?$|\b(?:article|section|clause)\s+\d", re.I)
 BODY_MARK = re.compile(r"[$%€£]|\b(?:shall|must|may|will|agrees?)\b", re.I)
 LIST_ITEM = re.compile(r"^\(?(?:[a-z]{1,2}|[ivxlc]{1,6}|\d{1,2})\)\s")  # (a) a) (iv) 1)
 # "3 days", "7.5 hours": a number followed by a lowercase unit is not a heading ("8 HOURS OF WORK" can be)
@@ -221,57 +225,80 @@ def _chunks(line: str) -> list[str]:
     return out + ([line] if line else [])
 
 
+def _page_variants(p: int, t: str):
+    """Keys for comparing an edge line across pages: the exact text, plus one variant per
+    number that could be this page's number (page index + small offset), masked."""
+    yield (t, None)
+    if not HAS_DIGIT.search(t):
+        return
+    for m in DIGITS.finditer(t):
+        k = int(m.group(0)) - (p + 1)
+        if abs(k) <= MAX_PAGE_OFFSET:
+            yield (t[:m.start()] + "#" + t[m.end():], k)
+
+
 def _clean_lines(text: str) -> list[str]:
     """Normalise lines, drop page furniture, keep everything else.
 
-    Dropped: explicit page numbers ("- 7 -", "Page 7 of 40") anywhere; a bare number at a
-    page edge when it equals the page index plus a small offset on >=3 pages (explicit
-    forms count toward that run); a header/footer repeated at the top or bottom of >=3
-    pages (both pages of a 2-page file), compared exactly except for the page number.
-    Kept: a bare number inside a page ("1500"), edge numbers that don't track the page
-    ("1500/1501/1502"), and any edge line with $, %, or shall/must/may/will."""
+    1. Running headers/footers: an edge line (one of the first/last EDGE non-empty lines)
+       identical, except for the page-number position, in the same edge slot on >=3 pages
+       and on at least half the pages. Those are dropped even
+       with modal words or $, unless the line ends like a sentence (. ; : ? !) or cites
+       Article/Section/Clause N, or is a heading. Repeats on a minority of pages (>=3) are
+       dropped only without $, %, a modal verb, sentence punctuation or a citation.
+    2. Page numbers: "- 7 -" / "Page 7 of 40" anywhere; a bare number at a page edge equal
+       to the page index plus a constant offset (<= MAX_PAGE_OFFSET) on >=3 pages, with the
+       explicit forms counting toward the run. Other numbers ("1500") are body text."""
     pages = [[_squash(x) for x in pg.split("\n")] for pg in text.split("\f")]
     drop: set[tuple[int, int]] = set()
-    edges = []  # (page, line index, text) for first/last non-empty lines
+    edges = []  # (page, line index, slot, text); slot = ("top", rank) or ("bottom", rank)
     for p, pg in enumerate(pages):
         idx = [i for i, x in enumerate(pg) if x]
-        for i in set(idx[:EDGE] + idx[-EDGE:]):
-            edges.append((p, i, pg[i]))
-    # 1) page numbers: bare "7", "- 7 -" or "Page 7 of 40" at a page edge whose value is the
-    #    page index plus a small constant offset (front matter) on >= 3 pages.
-    pn = []  # (page, line index, number, explicit form?)
-    for p, i, t in edges:
+        for r, i in enumerate(idx[:EDGE]):
+            edges.append((p, i, ("top", r), pg[i]))
+        for r, i in enumerate(reversed(idx[-EDGE:])):
+            edges.append((p, i, ("bottom", r), pg[i]))
+    n_pages = len(pages)
+    # 1) repeated headers/footers (checked first)
+    if n_pages >= 2:
+        need = min(3, n_pages)
+        where: dict[tuple, int] = {}
+        cand = []  # (page, line, [keys]) computed once per edge line
+        var: dict[tuple[int, int], list | None] = {}
+        for p, i, slot, t in edges:
+            if (p, i) not in var:  # a short page's line sits in both edges: compute once
+                var[(p, i)] = None if LONE_NUM.match(t) or PAGE_NUM.match(t) else list(_page_variants(p, t))
+            vs = var[(p, i)]
+            if vs is None:
+                continue
+            keys = [(slot, v) for v in vs]
+            cand.append((p, i, t, keys))
+            for key in keys:  # one edge slot per page, so a count is a page count
+                where[key] = where.get(key, 0) + 1
+        for p, i, t, keys in cand:
+            best = max(where[k] for k in keys)
+            if best < 3 and best < need or (p, i) in drop:
+                continue  # not repeated: the common case, decided without regexes
+            if KEEP_LINE.search(t) or _classify(t):
+                continue  # "Subject to Article 12." / a heading is body text even when it repeats
+            if best >= need and best * 2 >= n_pages:
+                drop.add((p, i))  # running header/footer on most pages
+            elif best >= 3 and not BODY_MARK.search(t):
+                drop.add((p, i))  # minority repeat: dropped only without $, % or a modal
+    # 2) page numbers
+    pn = []
+    for p, i, _, t in edges:
         m = LONE_NUM.match(t) or PAGE_NUM.match(t)
-        if m:
-            pn.append((p, i, int(m.group("n") or m.groupdict().get("m")), not LONE_NUM.match(t)))
+        if m and (p, i) not in drop:
+            pn.append((p, i, int(m.group("n") or m.groupdict().get("m"))))
     by_off: dict[int, set] = {}
-    for p, i, n, _ in pn:
+    for p, i, n in pn:
         if abs(n - (p + 1)) <= MAX_PAGE_OFFSET:
             by_off.setdefault(n - (p + 1), set()).add(p)
     offs = {k for k, ps in by_off.items() if len(ps) >= 3}
-    for p, i, n, _ in pn:
+    for p, i, n in pn:
         if n - (p + 1) in offs:
             drop.add((p, i))
-    # 2) running headers/footers: the same edge line on >= 3 pages (2 when there are two),
-    #    exact text except that the page number itself may differ. Lines with money, a
-    #    percentage or a modal verb are body text and never dropped; headings are kept.
-    if len(pages) >= 2:
-        def keys(p, t):
-            ks = {(t, None)}
-            for k in offs | set(range(-MAX_PAGE_OFFSET, MAX_PAGE_OFFSET + 1)):
-                n = p + 1 + k
-                if n > 0 and re.search(rf"(?<!\d){n}(?!\d)", t):
-                    ks.add((re.sub(rf"(?<![\d$.,]){n}(?![\d.,%])", "#", t), k))
-            return ks
-        counts: dict[tuple, set] = {}
-        cand = [(p, i, t) for p, i, t in edges if (p, i) not in drop and not BODY_MARK.search(t)]
-        for p, i, t in cand:
-            for key in keys(p, t):
-                counts.setdefault(key, set()).add(p)
-        need = 3 if len(pages) >= 3 else 2
-        for p, i, t in cand:
-            if any(len(counts[k]) >= need for k in keys(p, t)) and not _classify(t):
-                drop.add((p, i))
     out = []
     for p, pg in enumerate(pages):
         for i, line in enumerate(pg):
@@ -326,6 +353,7 @@ def split_sections(text: str) -> list[Section]:
     last_top = 0
     target = None  # heading dict that receives body lines
     block, block_is_annex = "", False
+    in_annex = False  # inside an appendix / schedule / letter block
     seen_annex: dict[str, int] = {}  # current top-level block (article or annex)
     style_kw = sum(1 for ln in lines if re.match(rf"^{KW}\s+(\d+|[IVXLC]+)\b", ln, re.I)) >= 2
     i = 0
@@ -345,6 +373,10 @@ def split_sections(text: str) -> list[Section]:
                 toc_numbers.add(c[1])
             i += 1; continue
         c = _classify(line)
+        if c and c[0] == "top" and in_annex and not in_toc:
+            # "1. DENTAL" inside Schedule C is a clause of that schedule, never a document
+            # article: number and dedupe it within the annex block.
+            c = ("clause", c[1], 0, c[3], c[4], 2)
         if c and c[0] == "top" and style_kw:
             c = None  # documents using ARTICLE headings: bare "N." lines are lists
         if c and c[0] == "top" and not (last_top == 0 or last_top < c[2] <= last_top + 3 or (in_toc and c[1] in toc_numbers)):
@@ -404,6 +436,10 @@ def split_sections(text: str) -> list[Section]:
             parent["lines"] += ["", f"{num} {body}".strip()]
             target = parent
             i += 1; continue
+        if kind == "annex":
+            in_annex = True
+        elif kind == "kw" and level == 1:
+            in_annex = False  # "ARTICLE 9" after an annex resumes the body
         if kind == "annex":
             block = num
         elif level == 1:

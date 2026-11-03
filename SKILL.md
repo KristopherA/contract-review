@@ -35,15 +35,18 @@ python3 $SKILL/scripts/contract_review.py <command> ...
    prints one heading per real article/clause (`ARTICLE 12`, `12`, `12.01`) with its
    title and deterministic key facts: amounts, percentages, time periods, dates,
    deadlines ("within 30 days") and obligation/right/prohibition sentences, each
-   cited (`§12.01`). The table of contents, page footers, and `(a)`, `(i)`, `1.` list
-   items are not sections. Standard boilerplate is folded and listed at the end.
+   cited (`§12.01`, `Appendix A, §1.01`). Letters of understanding, appendices and
+   schedules are their own top-level sections. The table of contents, running
+   headers/footers, page numbers, and `(a)`, `(i)`, `1.` list items are not sections. Standard boilerplate is folded and listed at the end.
    `--format json` gives `sections[].key_facts` for your own use.
 2. By default, give the user that outline as is. Do not add a model summary unless
    they ask for one ("summarize", "plain English").
 3. Optional plain-language summaries: read each section's `text` from the JSON,
    write one or two sentences per section id using only that text, and save
    `{"s3": "...", ...}` to `summaries.json`. Then rerun with
-   `--summaries summaries.json --format md`. Lay it out with
+   `--summaries summaries.json --format md`. The file must be a JSON object of
+   id → string; each value is collapsed to one line (max 2000 chars) and
+   Markdown-escaped, unknown ids are warned about and ignored. Lay it out with
    [templates/outline.md](templates/outline.md). Never add a fact that is not in the
    section's text. Keep the cited key facts under each summary.
 4. Flag anything unusual you notice (one-sided, uncapped, unilateral change rights,

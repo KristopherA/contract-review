@@ -133,7 +133,11 @@ and generate their PDF and DOCX fixtures at run time.
 
 - No OCR: scanned PDFs need a text layer.
 - Section splitting expects numbered headings (`1.`, `1.1`, `Section 3`,
-  `Article IV`). Unnumbered or table-heavy layouts split poorly.
+  `Article IV`) and upper-case annex headings. Unnumbered, multi-column body
+  text or table-heavy layouts split poorly; a letter without a `Re:` line gets a
+  derived title.
+- Evolve matches a clause by number or by a close title; a short or different
+  name (e.g. a single word for a longer heading) may report it as absent.
 - DOCX extraction reads the main body only (no headers, footers, comments or
   tracked-change markup; deleted revisions may appear as text).
 - Alignment is greedy and heuristic; low-score matches should be checked.

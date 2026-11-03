@@ -17,21 +17,29 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
-KW = r"(?:article|section|clause|schedule|appendix|part)"
+KW = r"(?:article|section|clause|part)"
 HEADING = re.compile(
     rf"^(?:(?P<kw>{KW})\s+)?"
     r"(?P<num>\d{1,3}(?:\.\d{1,3}){0,4}|[IVXLC]{1,6})"
     r"(?P<punct>[.):]?)(?:\s*[-–—:]\s*|\s+|$)(?P<rest>.*)$",
     re.IGNORECASE,
 )
-TOC_TITLE = re.compile(r"^(?:table\s+of\s+)?contents$|^index$|^table of contents$", re.I)
-LEADER = re.compile(r"(?:\.{3,}|…{2,}|(?:\.\s){3,}|_{3,})\s*\d{1,4}\s*$")
-TRAILING_PAGE = re.compile(r"\s{2,}\d{1,4}\s*$")
+# annexes start their own top-level block: "LETTER OF UNDERSTANDING #2 - Title", "APPENDIX A"
+ANNEX = re.compile(
+    r"^(?P<kw>letter\s+of\s+understanding|letter\s+of\s+intent|memorandum\s+of\s+(?:agreement|understanding)"
+    r"|appendix|schedule|addendum|annex)\b(?:\s+(?:no\.?\s*|#\s*)?(?P<id>[A-Z]{1,2}|\d{1,3}|[IVX]{1,5})\b)?"
+    r"\s*(?:[-–—:.]\s*)?(?P<rest>.{0,200})$", re.I)
+MAX_LINE = 2000  # longer lines are cut into chunks before any regex runs (bounded runtime)
+TOC_TITLE = re.compile(r"^(?:table\s+of\s+)?contents$|^(?:numerical\s+|alphabetical\s+|subject\s+)?index$", re.I)
+EDGE = 3  # header/footer candidates: first and last EDGE non-empty lines of each page
 # a "- 1 -" footer glued onto the next line by some PDF extractors: "-1ARTICLE 1 ..."
 GLUED_PAGE = re.compile(r"^[-–—]\s*\d{1,4}\s*[-–—]?\s*(?=(?:article|section|schedule|appendix|part)\b|\d+\.\d)", re.I)
-PAGE_LINE = re.compile(r"^(?:page\s+)?[-–—]?\s*\d{1,4}\s*[-–—]?(?:\s+of\s+\d{1,4})?$", re.I)
+# only explicit page-number forms are dropped anywhere: "- 7 -", "Page 7", "Page 7 of 40"
+PAGE_LINE = re.compile(r"^(?:[-–—]\s*\d{1,4}\s*[-–—]|page\s+\d{1,4}(?:\s+of\s+\d{1,4})?)$", re.I)
+LONE_NUM = re.compile(r"^\d{1,4}$")
 LIST_ITEM = re.compile(r"^\(?(?:[a-z]{1,2}|[ivxlc]{1,6}|\d{1,2})\)\s")  # (a) a) (iv) 1)
-UNIT_START = re.compile(r"^(?:days?|hours?|weeks?|months?|years?|%|percent|per\b|x\b)", re.I)
+# "3 days", "7.5 hours": a number followed by a lowercase unit is not a heading ("8 HOURS OF WORK" can be)
+UNIT_START = re.compile(r"^(?:[Dd]ays?|[Hh]ours?|[Ww]eeks?|[Mm]onths?|[Yy]ears?|%|percent|per\b|x\b)")
 MODAL = re.compile(r"\b(?:shall|must|will|may|is|are|has|have|was|were)\b", re.I)
 ROMAN = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 
@@ -76,6 +84,38 @@ def title_like(s: str) -> bool:
     return True
 
 
+def _strip_page_ref(s: str) -> tuple[str, bool]:
+    """Remove a trailing TOC page reference without backtracking regexes.
+
+    Returns (text without the reference, True if it had a dot/underscore leader)."""
+    t = s.rstrip()
+    k = len(t)
+    while k > 0 and t[k - 1].isdigit() and len(t) - k < 4:
+        k -= 1
+    if k == len(t) or (k > 0 and t[k - 1].isdigit()):
+        return s, False
+    head = t[:k].rstrip()
+    j = len(head)
+    while j > 0 and head[j - 1] in ". …_":
+        j -= 1
+    run = head[j:]
+    if run.count(".") + 2 * run.count("…") + run.count("_") >= 3 and run.strip(". ") in ("", "…" * len(run.strip(". "))) or "___" in run:
+        return head[:j].rstrip(), True
+    return s, False
+
+
+def _strip_leader(s: str) -> str:
+    """'TITLE ........ 12' -> 'TITLE'; also a bare dot run at the end."""
+    out, had = _strip_page_ref(s)
+    if had:
+        return out
+    t = s.rstrip()
+    j = len(t)
+    while j > 0 and t[j - 1] in ". …_":
+        j -= 1
+    return t[:j].rstrip() if len(t) - j >= 3 and t[j:].count(".") + t[j:].count("_") + t[j:].count("…") >= 3 else s
+
+
 def _split_title(rest: str) -> tuple[str, str]:
     """'Title. Body text' -> (Title, Body); 'Long sentence ...' -> ('', sentence)."""
     rest = rest.strip()
@@ -91,15 +131,31 @@ def _split_title(rest: str) -> tuple[str, str]:
     return "", rest
 
 
+def _annex(line: str):
+    m = ANNEX.match(line)
+    if not m:
+        return None
+    kw = re.sub(r"\s+", " ", m["kw"]).title().replace(" Of ", " of ")
+    rest = _strip_leader(m["rest"]).strip()
+    # "Appendix A sets out the rates..." in body text is not a heading
+    if not (m["kw"].isupper() or m["id"]) or (rest and not title_like(rest.rstrip(".:"))):
+        return None
+    num = f"{kw} {m['id'].upper()}" if m["id"] else kw
+    return ("annex", num, None, rest.rstrip(".:"), "", 1)
+
+
 def _classify(line: str):
     """Return (kind, num, top, title, body, level) for heading candidates, else None."""
     if LIST_ITEM.match(line):
         return None
+    a = _annex(line)
+    if a:
+        return a
     m = HEADING.match(line)
     if not m:
         return None
     num, rest, kw, punct = m["num"], m["rest"], m["kw"], m["punct"]
-    rest = LEADER.sub("", rest).strip()
+    rest = _strip_leader(rest).strip()
     if punct == ")":
         return None  # "1)" list item
     is_roman = bool(re.fullmatch(r"[IVXLC]+", num, re.I)) and not num.isdigit()
@@ -110,9 +166,13 @@ def _classify(line: str):
         if top is None:
             return None
         return ("kw" if kw else "top", num.upper(), top, *_split_title(rest), 1)
-    if UNIT_START.match(rest):
+    if UNIT_START.match(rest) and not rest.isupper():
         return None
     if kw:
+        if "." in num.strip(".") and not title_like(_split_title(rest)[0] or "x"):
+            return None  # "Article 14.03 (a) shall ..." is a cross-reference in wrapped body text
+        if rest[:1].islower() or rest[:1] == "(":
+            return None  # "Article 12 of this Agreement ..." / "Article 9 (b) ..."
         top = int(num.split(".")[0])
         return ("kw", num, top, *_split_title(rest), num.count(".") + 1)
     if "." in num.rstrip("."):
@@ -129,17 +189,97 @@ def _classify(line: str):
 
 
 def _is_toc_entry(line: str) -> bool:
-    return bool(LEADER.search(line) or (TRAILING_PAGE.search(line) and _classify(TRAILING_PAGE.sub("", line))))
+    out, had = _strip_page_ref(line)
+    if had:
+        return True
+    # "ARTICLE 3 HOURS OF WORK 4": a heading followed by a bare page number
+    m = re.match(r"^(.*\S)\s+(\d{1,4})$", line)
+    c = _classify(m[1]) if m else None
+    return bool(c and c[3] and (c[0] in ("kw", "annex") or c[3].isupper()))
+
+
+def _toc_key(line: str) -> str:
+    out, had = _strip_page_ref(line)
+    if not had:
+        out = re.sub(r"\s+\d{1,4}$", "", line)
+    return out.strip()
+
+
+def _chunks(line: str) -> list[str]:
+    if len(line) <= MAX_LINE:
+        return [line]
+    out = []
+    while len(line) > MAX_LINE:
+        cut = line.rfind(" ", 0, MAX_LINE)
+        cut = cut if cut > MAX_LINE // 2 else MAX_LINE
+        out.append(line[:cut].strip()); line = line[cut:].strip()
+    return out + ([line] if line else [])
 
 
 def _clean_lines(text: str) -> list[str]:
+    """Normalise lines, drop page furniture, keep everything else.
+
+    Dropped: explicit page numbers ("- 7 -", "Page 7 of 40"); a bare number that is the
+    first or last line of a page when those numbers run in sequence across >=2 pages;
+    a header/footer line repeated at the top or bottom of >=3 pages (or every page when
+    there are two). A bare number inside a page ("1500") is body text and is kept."""
+    pages = [[_squash(x) for x in pg.split("\n")] for pg in text.split("\f")]
+    drop: set[tuple[int, int]] = set()
+    edges = []  # (page, line index, text) for first/last non-empty lines
+    for p, pg in enumerate(pages):
+        idx = [i for i, x in enumerate(pg) if x]
+        for i in set(idx[:EDGE] + idx[-EDGE:]):
+            edges.append((p, i, pg[i]))
+    if len(pages) >= 2:
+        nums = [(p, i, int(t)) for p, i, t in edges if LONE_NUM.match(t)]
+        offsets: dict[int, list] = {}
+        for p, i, n in nums:
+            offsets.setdefault(n - p, []).append((p, i))
+        for hits in offsets.values():
+            if len({p for p, _ in hits}) >= 2:
+                drop.update(hits)
+        counts: dict[str, set] = {}
+        for p, i, t in edges:
+            if not LONE_NUM.match(t):
+                counts.setdefault(re.sub(r"\d+", "#", t), set()).add(p)
+        need = 3 if len(pages) >= 3 else 2
+        for p, i, t in edges:
+            if len(counts.get(re.sub(r"\d+", "#", t), ())) >= need and not _classify(t):
+                drop.add((p, i))
     out = []
-    for raw in text.replace("\f", "\n").split("\n"):
-        line = GLUED_PAGE.sub("", re.sub(r"[ \t]+", " ", raw).strip())
-        if line and PAGE_LINE.match(line):
-            continue
-        out.append(line)
+    for p, pg in enumerate(pages):
+        for i, line in enumerate(pg):
+            if (p, i) in drop or (line and PAGE_LINE.match(line)):
+                continue
+            out += _chunks(GLUED_PAGE.sub("", line))
+        out.append("")
     return out
+
+
+def _squash(raw: str) -> str:
+    return re.sub(r"[ \t]+", " ", raw).strip()
+
+
+SENTENCE_START = re.compile(r"^(?:the|a|an|where|when|if|within|following|except|effective|all|any|each|no|"
+                            r"in|on|upon|subject|notwithstanding|this|these|that|those|there|it|nothing|every|"
+                            r"an?\s+employee)\b", re.I)
+VERBISH = re.compile(r"\b(?:shall|will|may|must|is|are|was|were|has|have|expires?|applies|means)\b", re.I)
+
+
+def _real_title(title: str, lines: list[str], i: int) -> bool:
+    """A clause title must not continue as a sentence on the next line and should read as a
+    heading: upper case, or most longer words capitalised, not opening like a sentence."""
+    j = _next_nonempty(lines, i)
+    if j < len(lines) and lines[j][:1].islower():
+        return False
+    if lines[i].rstrip().endswith(".") and len(title.split()) >= 2 and (j >= len(lines) or _classify(lines[j])):
+        return False  # a one-sentence clause with no body is body text, not a title
+    if title.isupper():
+        return True
+    if len(title.split()) > 3 and (SENTENCE_START.match(title) or VERBISH.search(title)):
+        return False
+    words = [w for w in re.findall(r"[A-Za-z][\w'’-]*", title) if len(w) >= 4]
+    return not words or sum(w[0].isupper() for w in words) * 2 >= len(words)
 
 
 def _next_nonempty(lines, i):
@@ -157,6 +297,8 @@ def split_sections(text: str) -> list[Section]:
     toc_numbers: set[str] = set()
     last_top = 0
     target = None  # heading dict that receives body lines
+    block, block_is_annex = "", False
+    seen_annex: dict[str, int] = {}  # current top-level block (article or annex)
     style_kw = sum(1 for ln in lines if re.match(rf"^{KW}\s+(\d+|[IVXLC]+)\b", ln, re.I)) >= 2
     i = 0
     while i < len(lines):
@@ -170,7 +312,7 @@ def split_sections(text: str) -> list[Section]:
         if TOC_TITLE.match(line):
             in_toc = True; i += 1; continue
         if _is_toc_entry(line):
-            c = _classify(LEADER.sub("", TRAILING_PAGE.sub("", line)).strip())
+            c = _classify(_toc_key(line))
             if c:
                 toc_numbers.add(c[1])
             i += 1; continue
@@ -202,19 +344,40 @@ def split_sections(text: str) -> list[Section]:
             (target["lines"] if target is not None else preamble).append(line)
             i += 1; continue
         kind, num, top, title, body, level = c
+        if kind in ("clause", "top") and title and not body and not _real_title(title, lines, i):
+            title, body = "", title  # "4.01 The Employer recognizes the" + wrapped lowercase line
+        if kind == "annex" and not title:
+            for k in range(i + 1, min(i + 15, len(lines))):  # "LETTER OF UNDERSTANDING ... Re: Subject"
+                rm = re.match(r"^re\s*:\s*(.{3,90})$", lines[k], re.I)
+                if rm:
+                    title = rm[1].rstrip(".:"); break
+                if _classify(lines[k]):
+                    break
+        if kind == "annex":
+            seen_annex[num] = seen_annex.get(num, 0) + 1
+            if seen_annex[num] > 1 or any(h["num"] == num for h in heads):
+                num = f"{num} ({seen_annex[num]})"
         if kind == "kw" and not title:
             j = _next_nonempty(lines, i)
             if j < len(lines) and title_like(lines[j]) and not _classify(lines[j]):
                 title = lines[j].rstrip(".:"); i = j
         if kind in ("kw", "top") and level == 1:
             last_top = top
+        elif kind == "annex":
+            last_top = 0  # clause numbering restarts inside an appendix / letter
         parent = next((h for h in reversed(heads) if h["level"] < level), None)
         if kind == "clause" and not title and parent is not None:
             parent["parts"].append([num, [body] if body else []])
             parent["lines"] += ["", f"{num} {body}".strip()]
             target = parent
             i += 1; continue
-        target = {"num": num, "title": title, "level": level, "lines": [body] if body else [], "parts": []}
+        if kind == "annex":
+            block = num
+        elif level == 1:
+            block = num
+        target = {"num": num, "title": title, "level": level, "lines": [body] if body else [], "parts": [],
+                  "block": block, "annex": kind == "annex" or (level > 1 and block_is_annex)}
+        block_is_annex = kind == "annex" or (level > 1 and block_is_annex)
         heads.append(target)
         i += 1
     # attribute body lines after an untitled clause to that clause's part
@@ -249,20 +412,30 @@ def _parts(h) -> list:
 
 
 def _dedupe(heads: list[dict]) -> list[dict]:
-    """Drop body-less headings repeated later (TOC without a CONTENTS title); merge true repeats."""
+    """Drop body-less headings repeated later (a TOC without a CONTENTS title) and merge
+    true repeats. Top-level numbers are compared document-wide; clause numbers only
+    within their own top-level block, so "1.01" in Article 1 and in Appendix A differ."""
+    def key(h):
+        return (h["num"],) if h["level"] == 1 else (h["block"], h["num"])
     out: list[dict] = []
     for k, h in enumerate(heads):
         empty = not _join(h["lines"])
-        later = any(x["num"] == h["num"] for x in heads[k + 1:])
+        later = any(key(x) == key(h) for x in heads[k + 1:])
         if empty and later:
             continue
-        prev = next((x for x in out if x["num"] == h["num"]), None)
+        prev = next((x for x in out if key(x) == key(h)), None)
         if prev is not None:
             if not empty:
                 prev["lines"] += [""] + h["lines"]; prev["parts"] += h["parts"]
                 prev["title"] = prev["title"] or h["title"]
             continue
         out.append(h)
+    for h in out:  # qualify clause numbers inside annexes so numbers stay unique
+        if h["annex"]:
+            b = h["block"]
+            h["parts"] = [(n if n.startswith(b) else f"{b} {n}", t) for n, t in h["parts"]]
+            if not h["num"].startswith(b):
+                h["num"] = f"{b} {h['num']}"
     return out
 
 
@@ -283,7 +456,19 @@ def _join(lines: list[str]) -> str:
     return "\n\n".join(paras).strip()
 
 
+def cite(number: str) -> str:
+    """'3.01' -> '§3.01'; 'Appendix A 1.01' -> 'Appendix A, §1.01'; 'Appendix A' -> 'Appendix A'."""
+    if not number:
+        return ""
+    if number[0].isdigit() or re.fullmatch(r"[IVXLC]+(?:\.\d+)*", number):
+        return f"§{number}"
+    head, _, last = number.rpartition(" ")
+    if head and "." in last and last[0].isdigit():
+        return f"{head}, §{last}"
+    return number
+
+
 def label(s: Section) -> str:
     if not s.number:
         return s.title or s.id
-    return f"§{s.number}" + (f" {s.title}" if s.title else "")
+    return cite(s.number) + (f" {s.title}" if s.title else "")

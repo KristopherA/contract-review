@@ -16,10 +16,17 @@ def fixtures():
 
 
 def make_pdf(path: Path, lines: list[str], per_page: int = 60) -> Path:
-    """Write a minimal text PDF (Helvetica), `per_page` lines per page, no third-party libs."""
+    """Write a minimal text PDF (Helvetica), `per_page` lines per page ("\\f" item = page break)."""
     def esc(s):
         return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    pages = [lines[i:i + per_page] for i in range(0, len(lines), per_page)] or [[]]
+    groups, cur = [], []
+    for ln in lines:  # a "\f" item forces a page break
+        if ln == "\f":
+            groups.append(cur); cur = []
+        else:
+            cur.append(ln)
+    groups.append(cur)
+    pages = [g[i:i + per_page] for g in groups for i in range(0, max(len(g), 1), per_page)] or [[]]
     n = len(pages)
     font = 3 + 2 * n
     objs = [b"<< /Type /Catalog /Pages 2 0 R >>",

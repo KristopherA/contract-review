@@ -37,7 +37,7 @@ def _pdf_pdftotext(path: Path, timeout: float, expected_pages: int | None = None
     if not exe:
         raise ExtractionError("pdftotext not found")
     try:
-        res = subprocess.run([exe, "-enc", "UTF-8", "-l", str(MAX_PDF_PAGES), "--", str(path), "-"],
+        res = subprocess.run([exe, "-layout", "-enc", "UTF-8", "-l", str(MAX_PDF_PAGES), "--", str(path), "-"],
                              capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         raise ExtractionError(f"pdftotext timed out after {timeout:g}s") from exc
@@ -110,7 +110,7 @@ def _pdf_pypdf(path: Path) -> str:
         reader = PdfReader(str(path))
         if len(reader.pages) > MAX_PDF_PAGES:
             raise ExtractionError(f"{path.name}: more than {MAX_PDF_PAGES} pages")
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
+        return "\n\f\n".join((page.extract_text() or "") for page in reader.pages)
     except ExtractionError:
         raise
     except Exception as exc:  # pypdf raises many types (PdfReadError, ValueError, KeyError...)
@@ -205,8 +205,14 @@ def extract_text(path: str | Path, pdf_backend: str = "auto") -> str:
 
 
 def normalise(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
+    # page breaks are kept as a lone "\f" line so the splitter can find running headers/footers
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n\f\n")
     text = text.replace("\u00a0", " ")
-    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # de-hyphenate line breaks
+    # de-hyphenate line breaks, but keep compound number words ("twenty-\none" -> "twenty-one")
+    text = re.sub(r"\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-[ \t]*\n[ \t]*(?=[a-z])",
+                  r"\1-", text, flags=re.I)
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"[ \t]+", " ", text)
-    return "\n".join(line.strip() for line in text.split("\n")).strip() + "\n"
+    text = "\n".join(line.strip(" \t") for line in text.split("\n"))
+    text = re.sub(r"\n{3,}(?=\f)|(?<=\f)\n{3,}", "\n", text)
+    return text.strip() + "\n"

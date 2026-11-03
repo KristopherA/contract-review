@@ -16,11 +16,22 @@
 `sections[]` = section + `cite`, `clauses[]` (untitled sub-clause numbers merged in) and
 `key_facts` = `{amounts, percentages, durations, dates: [{value, cite}], deadlines:
 [{text, cite}], obligations: [{kind: obligation|prohibition|right, who, text, cite}]}`.
-Facts are regex-based, no model. `--summaries FILE` (JSON `{section id: text}`) adds a
-`**Summary:**` line per section in Markdown; off by default.
-Sections: only `ARTICLE/SECTION/CLAUSE N`, `N` and `N.NN` headings count; TOC entries
-(dot leaders, page numbers, a CONTENTS block), page footers and `(a)`/`(i)`/`1.` list
-items stay out. A clause number must belong to the current article; an untitled
+Facts are regex-based, no model, and each line is capped at 2000 chars so matching stays
+linear. A sentence with `shall not / must not / may not / will not / cannot` is a
+prohibition. `--summaries FILE` (JSON `{section id: string}`, max 1 MB) adds a
+`**Summary:**` line per section in Markdown; off by default. Values are collapsed to
+one line, capped at 2000 chars and Markdown-escaped; unknown ids go to stderr as
+warnings; any other shape exits 2. `diff --summaries` and `evolve --notes` follow the same rules.
+Sections: only `ARTICLE/SECTION/CLAUSE/PART N`, `N` and `N.NN` headings count, plus
+annexes (`LETTER OF UNDERSTANDING`, `APPENDIX A`, `SCHEDULE 1`, memorandum, addendum,
+annex) which start their own top-level block; an untitled annex takes its title from a
+`Re:` line. Clause numbers inside an annex are scoped to it (`Appendix A 1.01`, cited
+`Appendix A, §1.01`), so a repeated `1.01` is not a duplicate. TOC entries (dot
+leaders, trailing page numbers, a CONTENTS/INDEX block) and `(a)`/`(i)`/`1.` list
+items stay out. Page furniture is dropped: `- N -` and `Page N of M` lines, bare
+numbers at the top/bottom of pages that run in sequence, and lines repeated (digits
+ignored) at the top/bottom of 3+ pages. A bare number inside a page (`1500`) is kept.
+PDFs go through `pdftotext -layout` so two-column clause number/title layouts stay on one line. A clause number must belong to the current article; an untitled
 `N.NN` clause is merged into its article as a cited part.
 `boilerplate_folded[]` = `{section, id, clause, score}`. Threshold: library `threshold`
 (default 95) or `--threshold`; per-clause `threshold` overrides. A section folds only

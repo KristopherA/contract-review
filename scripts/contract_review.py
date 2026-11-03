@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -30,8 +31,35 @@ def _secs(path, backend):
     return split_sections(extract_text(path, backend))
 
 
-def _load_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8")) if path else None
+MAX_SUMMARY_FILE = 1_000_000  # bytes
+MAX_SUMMARY_CHARS = 2000      # per entry
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>#|~])")
+
+
+def _load_summaries(path, known_ids, what="id"):
+    """Read model-written summaries: a JSON object {id: string}. Each value becomes one
+    Markdown-escaped line. Unknown ids are reported on stderr and ignored."""
+    if not path:
+        return {}
+    p = Path(path)
+    if p.stat().st_size > MAX_SUMMARY_FILE:
+        raise ValueError(f"{p.name}: summaries file larger than {MAX_SUMMARY_FILE // 1000} KB")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{p.name}: not valid JSON ({exc.msg})") from exc
+    if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+        raise ValueError(f"{p.name}: summaries must be a JSON object of {what} -> string")
+    out = {}
+    for k, v in data.items():
+        if k not in known_ids:
+            print(f"warning: {p.name}: unknown {what} {k!r} ignored", file=sys.stderr)
+            continue
+        line = " ".join(v.split())
+        if len(line) > MAX_SUMMARY_CHARS:
+            line = line[:MAX_SUMMARY_CHARS - 1] + "…"
+        out[k] = _MD_SPECIAL.sub(r"\\\1", line)
+    return out
 
 
 def _emit(obj, fmt, md):
@@ -72,19 +100,21 @@ def main(argv=None) -> int:
         elif a.cmd == "outline":
             lib = None if a.no_fold else boilerplate.load_library(a.library)
             o = build(_secs(a.file, a.pdf_backend), lib, a.threshold)
-            _emit(o, a.format, lambda: report.outline_markdown(o, Path(a.file).name,
-                                                                    _load_json(a.summaries)))
+            summ = _load_summaries(a.summaries, {x["id"] for x in o["sections"]}, "section id")
+            _emit(o, a.format, lambda: report.outline_markdown(
+                o, Path(a.file).name, summ))
         elif a.cmd == "diff":
             ch = diff_documents(_secs(a.old, a.pdf_backend), _secs(a.new, a.pdf_backend), a.match_threshold)
-            _emit(ch, a.format, lambda: report.diff_markdown(ch, Path(a.old).name, Path(a.new).name,
-                                                             _load_json(a.summaries)))
+            summ = _load_summaries(a.summaries, {c["id"] for c in ch}, "change id")
+            _emit(ch, a.format, lambda: report.diff_markdown(ch, Path(a.old).name, Path(a.new).name, summ))
         elif a.cmd == "evolve":
             if len(a.files) < 2:
                 ap.error("evolve needs at least two versions")
             vs = [(Path(f).name, _secs(f, a.pdf_backend)) for f in a.files]
             r = evolve(vs, a.section, a.match_threshold)
             summ = Path(a.summary_file).read_text(encoding="utf-8").strip() if a.summary_file else None
-            _emit(r, a.format, lambda: report.evolution_markdown(r, summ, _load_json(a.notes)))
+            notes = _load_summaries(a.notes, {n for n, _ in vs}, "version")
+            _emit(r, a.format, lambda: report.evolution_markdown(r, summ, notes))
     except (ExtractionError, ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

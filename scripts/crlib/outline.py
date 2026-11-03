@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from . import boilerplate as bp
 from . import facts as fx
-from .sections import Section, label
+from .sections import Section, cite, label
 
 FACT_KEYS = ("amounts", "percentages", "durations", "dates", "deadlines", "obligations")
 
@@ -21,7 +21,7 @@ def build(sections: list[Section], library: dict | None, threshold: float | None
             continue
         parts = s.parts or ([(s.number, s.text)] if s.text else [])
         f = fx.extract(parts)
-        short = f"§{s.number}" if s.number else s.title
+        short = cite(s.number) or s.title
         for v in f.values():
             for item in v:
                 item["cite"] = item["cite"] or short

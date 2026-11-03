@@ -1,7 +1,10 @@
 """Markdown rendering. Model-written summaries are merged in by change id."""
 from __future__ import annotations
 
+import re
+
 from .diffing import render_word_diff
+from .sections import cite
 
 NOTE = "> _Generated locally by contract-review. Not legal advice; verify against the source documents._\n"
 
@@ -9,7 +12,7 @@ NOTE = "> _Generated locally by contract-review. Not legal advice; verify agains
 def _lbl(s):
     if not s:
         return "—"
-    return f"§{s['number']} {s['title']}".strip() if s["number"] else (s["title"] or s["id"])
+    return f"{cite(s['number'])} {s['title']}".strip() if s["number"] else (s["title"] or s["id"])
 
 
 def diff_markdown(changes, old_name, new_name, summaries=None) -> str:
@@ -18,7 +21,7 @@ def diff_markdown(changes, old_name, new_name, summaries=None) -> str:
              f"{len(changes)} change(s).", "",
              "| # | Change | Old | New | Summary |", "|---|---|---|---|---|"]
     for c in changes:
-        summ = summaries.get(c["id"], "_(summary pending)_").replace("|", "\\|").replace("\n", " ")
+        summ = re.sub(r"(?<!\\)\|", r"\\|", summaries.get(c["id"], "_(summary pending)_")).replace("\n", " ")
         kinds = ", ".join(c["kinds"]) + (" ⚠ low-confidence match" if c.get("low_confidence") else "")
         lines.append(f"| {c['id']} | {kinds} | {_lbl(c['old'])} | {_lbl(c['new'])} | {summ} |")
     lines.append("")

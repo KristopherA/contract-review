@@ -159,3 +159,9 @@ Body-page header/footer counting, no-TOC numbering-gap resume, dropped repeated/
 headings, Definition facts, 8-word `who` cap, agreeing word/figure pairs only, quiet pypdf,
 and label-stripped boilerplate matching with generic CBA clauses. See
 references/helper-output.md, "Draft 11 rules". Tests: `pytest -q` prints the true count.
+
+## Draft 12
+Safer boilerplate label stripping, odd/even rule limited to running titles with a partner,
+definition plus obligation, "half a day", bare "(n) days", continued LOUs, restated articles
+merged without loss, and a stderr warning on the no-TOC gap resume. See
+references/helper-output.md, "Draft 12 rules".

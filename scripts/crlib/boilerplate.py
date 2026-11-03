@@ -108,14 +108,16 @@ def load_library(path: str | Path | None = None) -> dict:
     return {"threshold": thr, "clauses": clauses}
 
 
-# "12.01 " clause labels at line starts are numbering, not content: without this the
-# numbers guard refused every real section ("12.01" is never in the library text)
-CLAUSE_LABEL = re.compile(r"(?m)^\s*\(?\d{1,3}(?:\.\d{1,3}){1,4}\)?[.:]?[ \t]+")
+# a "12.01 " clause label is numbering, not content: without stripping it the numbers
+# guard refused every real section. Only at the start of the section or of a paragraph
+# (after a blank line) and only before a capital letter, so a "30.5 hours" line added
+# mid-paragraph keeps its number and still blocks the fold.
+CLAUSE_LABEL = re.compile(r"(\A|\n[ \t]*\n)[ \t]*\(?\d{1,3}(?:\.\d{1,3}){1,4}\)?[.:]?[ \t]+(?=[A-Z])")
 
 
 def match(section_text: str, title: str, library: dict, threshold: float | None = None):
     """Return (clause_id, score) of the best safe match at/above threshold, else None."""
-    section_text = CLAUSE_LABEL.sub("", section_text)
+    section_text = CLAUSE_LABEL.sub(r"\1", section_text)
     best = None
     for c in library["clauses"]:
         thr = float(c.get("threshold", threshold if threshold is not None else library["threshold"]))

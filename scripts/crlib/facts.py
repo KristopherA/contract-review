@@ -20,10 +20,10 @@ _SMALL = rf"(?:(?:{'|'.join(_TENS)})(?:[\s-](?:{'|'.join(_ONES[:9])}))?|{_ONE_RX
 # "four hundred and fifty-six", "twenty four", "seven point five", "one point zero seven"
 _INT = rf"(?:(?:{_ONE_RX})\s+hundred(?:\s+(?:and\s+)?{_SMALL})?|{_SMALL}|hundred)"
 _DEC = rf"(?:{_INT}\s+point(?:\s+(?:{'|'.join(_DIG)})){{1,3}})"
-WORDNUM = rf"(?:(?:{_DEC}|{_INT})(?:\s+and\s+(?:one-half|a\s+half))?|one-half|half|a)"
-NUM = rf"(?:{WORDNUM}\s*\(\d+(?:\.\d+)?\)|\d+(?:\.\d+)?|{WORDNUM})"
+WORDNUM = rf"(?:half\s+an?|(?:{_DEC}|{_INT})(?:\s+and\s+(?:one-half|a\s+half))?|one-half|half|a)"
+NUM = rf"(?:{WORDNUM}\s*\(\d+(?:\.\d+)?\)|\(\d+(?:\.\d+)?\)|\d+(?:\.\d+)?|{WORDNUM})"
 UNIT = r"(?:calendar\s+|working\s+|business\s+|consecutive\s+)?(?:minutes?|hours?|days?|weeks?|months?|years?|Working\s+Days?)"
-DURATION = re.compile(rf"\b{NUM}\s+{UNIT}\b", re.I)
+DURATION = re.compile(rf"(?:\b|(?<![\w)])(?=\(\d)){NUM}\s+{UNIT}\b", re.I)
 DEADLINE = re.compile(rf"\b(?:within|no\s+later\s+than|not\s+later\s+than|at\s+least|not\s+less\s+than|"
                       rf"prior\s+to|before|after|by)\s+(?:{NUM}\s+{UNIT}|(?:{MONTHS})\s+\d{{1,2}}(?:,\s+\d{{4}})?)"
                       r"(?:\s+(?:of|after|before|from|following|prior\s+to)\s+[^.;,()]{1,50})?", re.I)
@@ -52,6 +52,8 @@ DETERMINER = re.compile(r"\b(?:the|an?|each|every|any|all|such|no)\s", re.I)
 DEFINITION = re.compile(r"^(?:\(?[a-z0-9]{1,4}[.)]\s*)?(?P<term>[\"\u201c']?[A-Za-z][\w'\u2019 -]{0,60}?[\"\u201d']?)"
                         r"\s+(?:shall\s+mean|means|shall\s+include|includes|refers?\s+to|shall\s+refer\s+to|"
                         r"is\s+defined\s+as|shall\s+be\s+defined\s+as)\b")
+# a second clause after a definition: ", and the ...", "; ", " and each ..."
+DEF_TAIL = re.compile(r"(?:;\s*|,?\s+(?:and|but)\s+(?=(?:the|an?|each|every|any|all|no|neither|nothing)\s))", re.I)
 MAX_WHO_WORDS = 8
 MAX_CHUNK = 2000
 OVERLAP = 200  # windows of an over-long sentence overlap; _scan keeps one match per span
@@ -140,11 +142,13 @@ def _int_value(toks: list[str]) -> float | None:
 PAIR = re.compile(rf"^(?P<w>{WORDNUM})\s*\((?P<n>\d+(?:\.\d+)?)\)", re.I)
 # "1.07", "3.01": decimal with a zero-led fraction reads as a clause number, not a quantity
 CLAUSE_NUM = re.compile(r"^\d{1,3}\.0\d")
-REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|s|clause|schedule|appendix)\.?|§)\s*\(?$", re.I)
+REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|s|clause|schedule|appendix)\.?|§)\s*\(?\s*$", re.I)
 
 
 def _word_value(w: str) -> float | None:
     w = re.sub(r"\s+", " ", w.lower()).strip()
+    if re.fullmatch(r"half an?", w):
+        return 0.5
     if w in ("a", "one-half", "half"):
         return {"a": 1, "one-half": 0.5, "half": 0.5}[w]
     half = 0.5 if re.search(r" and (?:one-half|a half)$", w) else 0
@@ -174,6 +178,11 @@ def _quantity(snt: str, start: int, v: str) -> str | None:
         if wv is None or abs(wv - float(pm["n"])) > 1e-9:
             q = pm["w"] + q[pm.end():]  # disagreeing bracket: a reference, not the number
         return v[:off] + q
+    bare = re.match(r"\((\d+(?:\.\d+)?)\)\s+", q)
+    if bare:  # "(10) days" with no word before it: the figure is the quantity
+        if REF_BEFORE.search(snt[:start + off]) or CLAUSE_NUM.match(bare[1]):
+            return None
+        return v[:off] + bare[1] + " " + q[bare.end():]
     nm = re.match(r"\d+(?:\.\d+)?", q)
     if nm and (CLAUSE_NUM.match(q) or REF_BEFORE.search(snt[:start + off])
                or (snt[start + off - 1:start + off] == "(" and snt[start + off + nm.end():][:1] == ")")):
@@ -235,8 +244,10 @@ def _scan(snt: str, cite: str, out: dict) -> None:
     d = definition(snt)
     if d:
         out["definitions"].append({**d, "cite": cite})
-        return
-    ob = obligation(snt)  # MODAL is a fixed-word alternation: linear even on long sentences
+        # keep scanning: "A day means a calendar day and the Employer shall pay." also obliges
+        tail = DEF_TAIL.search(snt, DEFINITION.match(snt).end())
+        snt = snt[tail.end():] if tail else ""
+    ob = obligation(snt) if snt else None  # MODAL is a fixed-word alternation: linear even on long sentences
     if ob:
         out["obligations"].append({**ob, "cite": cite})
 

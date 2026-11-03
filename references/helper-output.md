@@ -118,3 +118,21 @@ previous version, falling back to a title/number search.
   numbers guard no longer fails on every numbered clause; the library has generic
   collective-agreement clauses (management rights, no discrimination, severability,
   entire agreement, notices, term, no strike, gender).
+
+## Draft 12 rules
+- Boilerplate: a clause label ("12.01 ") is stripped only at the start of the section or
+  of a paragraph, and only before a capital letter. A number line added mid-paragraph
+  ("30.5 ...") keeps its number, so the numbers guard blocks the fold.
+- Odd/even header rule: only for lines with no sentence punctuation, modal, $ or %, and
+  only when a different line alternates with it in the same slot on the other parity.
+  A sentence on alternate pages ("The Employer shall pay the rate in Appendix A.") is kept.
+  A lone title on half the pages is still dropped by the half-of-pages header rule.
+- A sentence can be both a definition and an obligation: after the definition, a second
+  clause (", and the ...", "; ...") is scanned for an obligation.
+- "half a day" / "half an hour" is 0.5 of the unit. A bracketed figure with no word
+  before it ("(10) days") is the quantity, unless a reference word precedes it.
+- "LETTER OF UNDERSTANDING - continued" joins the open letter (also "Letter of
+  Understanding 2").
+- An article restated with a new title merges into the first: titles are joined
+  ("WAGES / HOURS OF WORK") and no sub-clause or text is dropped.
+- The no-TOC gap-resume rule prints a stderr warning naming the resumed heading.

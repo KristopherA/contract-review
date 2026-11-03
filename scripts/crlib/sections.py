@@ -15,6 +15,7 @@ Rules (deterministic, conservative):
 from __future__ import annotations
 
 import math
+import sys
 import re
 from dataclasses import asdict, dataclass, field
 
@@ -315,9 +316,20 @@ def _clean_lines(text: str) -> list[str]:
                 par[(key, p % 2)] = par.get((key, p % 2), 0) + 1
         bottom = {(p, i) for p, i, slot, _ in edges if slot[0] == "bottom"}
         always = max(ALWAYS_MIN, math.ceil(ALWAYS_SHARE * n_body))
+        def _alt(k, q):  # on every body page of parity q, on under half of the other parity
+            return par.get((k, q), 0) >= max(ALWAYS_MIN, n_par[q]) and par.get((k, 1 - q), 0) * 2 < n_par[1 - q]
+        alt_slots: dict[tuple, set] = {}  # (slot, parity) -> alternating line variants
+        for p, i, t, keys in cand:
+            if SENT_END.search(t) or BODY_MARK.search(t):
+                continue  # odd/even furniture is a running title, never a sentence, modal, $ or %
+            for k in keys:
+                for q in (0, 1):
+                    if _alt(k, q):
+                        alt_slots.setdefault((k[0], q), set()).add(k[1])
         for p, i, t, keys in cand:
             best = max(where.get(k, 0) for k in keys)
-            alt = any(par.get((k, q), 0) >= max(ALWAYS_MIN, n_par[q]) and par.get((k, 1 - q), 0) * 2 < n_par[1 - q]
+            # odd/even: only with a different alternating line on the other parity, same slot
+            alt = any(k[1] in alt_slots.get((k[0], q), ()) and (alt_slots.get((k[0], 1 - q), set()) - {k[1]})
                       for k in keys for q in (0, 1))
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
@@ -437,13 +449,18 @@ def split_sections(text: str) -> list[Section]:
         # with an explicit "continued"
         if c and not in_toc and (c[0] == "kw" or c[0] == "annex" and cm) and c[5] == 1 and heads:
             open_ = next((h for h in reversed(heads) if h["level"] == 1), None)
-            if open_ is not None and open_["num"] == c[1] and (cm or not c[3] or c[3] == open_["title"]) \
+            base = re.sub(r" \(\d+\)$", "", open_["num"]) if open_ is not None else None
+            if c[0] == "annex" and base and base.startswith(c[1] + " "):
+                base = c[1]  # "LETTER OF UNDERSTANDING - continued" inside "Letter of Understanding 2"
+            if open_ is not None and base == c[1] and (cm or not c[3] or c[3] == open_["title"]) \
                     and not c[4]:
                 i += 1; continue  # "ARTICLE 2: WAGES" repeated atop its next page / "- continued"
         if c and c[0] == "top" and in_annex and not in_toc and not style_kw and not toc_main \
                 and last_main and c[2] == last_main + 1 and c[2] != annex_item + 1:
             # no TOC: a number that skips the schedule's own sequence but continues the
             # main one ("SCHEDULE A / 1. RATES / 3. HOURS" after "2. WAGES") resumes the body
+            print(f"warning: no TOC or ARTICLE headings; {line[:80]!r} skips the schedule's numbering "
+                  f"and is read as resuming the main body", file=sys.stderr)
             in_annex = False; last_top = last_main
         if c and c[0] == "top" and in_annex and not in_toc and not style_kw and c[1] in toc_main \
                 and c[2] != annex_item + 1:
@@ -574,12 +591,16 @@ def _dedupe(heads: list[dict]) -> list[dict]:
     for k, h in enumerate(heads):
         empty = not _join(h["lines"])
         later = any(key(x) == key(h) for x in heads[k + 1:])
-        if empty and later:
+        kids = k + 1 < len(heads) and heads[k + 1]["level"] > h["level"]
+        if empty and later and not kids:  # a TOC line; an "ARTICLE 2: WAGES" with sub-clauses stays
             continue
         prev = next((x for x in out if key(x) == key(h)), None)
         if prev is not None:
             if not empty:
                 prev["lines"] += [""] + h["lines"]; prev["parts"] += h["parts"]
+            if h["title"] and prev["title"] and h["title"].lower() != prev["title"].lower():
+                prev["title"] = f"{prev['title']} / {h['title']}"  # "ARTICLE 2" restated: keep both titles
+            else:
                 prev["title"] = prev["title"] or h["title"]
             continue
         out.append(h)

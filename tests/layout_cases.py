@@ -111,9 +111,19 @@ case("cover + TOC pages + Pension footer on every body page",
      doc(COVER, "CONTENTS\nARTICLE 1 PURPOSE ..... 3\nARTICLE 2 WAGES ..... 4",
          *(art(k, bottom=[PENSION + "."]) for k in range(1, 7))), tree_art(6), amounts=money(6),
      gone=["Pension"], obligations=6)
-case("Pension footer on every other page (odd pages only) dropped",
+case("plan sentence footer on every other page kept (odd/even rule is for running titles only)",
      arts(10, f=lambda k: {"bottom": [PENSION + "."]} if k % 2 else {}), tree_art(10), amounts=money(10),
-     gone=["Pension"], obligations=10)
+     keep=["Pension"])
+case("clause on odd pages 1, 3, 5, 7 of 8 kept",
+     arts(8, f=lambda k: {"bottom": ["The Employer shall pay the rate in Appendix A."]} if k % 2 else {}),
+     tree_art(8), amounts=money(8), keep=["shall pay the rate in Appendix A"])
+case("alternating running titles (odd/even) dropped",
+     arts(10, f=lambda k: {"top": ["Sample Employer and Sample Union" if k % 2 else "Collective Agreement 2026-2028"]}),
+     tree_art(10), amounts=money(10), gone=["Sample Employer and Sample Union", "Collective Agreement 2026-2028"],
+     obligations=10)
+case("title on odd pages with no partner still dropped by the half-of-pages header rule",
+     arts(10, f=lambda k: {"top": ["Sample Employer and Sample Union"]} if k % 2 else {}),
+     tree_art(10), amounts=money(10), gone=["Sample Employer and Sample Union"])
 case("bottom modal sentence on 5 of 5 pages dropped",
      arts(5, f=lambda k: {"bottom": ["The Employer shall post this Agreement."]}), tree_art(5),
      amounts=money(5), gone=["shall post this Agreement"], obligations=5)

@@ -39,7 +39,7 @@ def test_layout_case(c):
 
 
 def test_corpus_size():
-    assert len(CASES) >= 49
+    assert len(CASES) >= 52
 
 
 def test_clean_flag_is_set_on_every_furniture_case():

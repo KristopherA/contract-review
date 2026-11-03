@@ -112,6 +112,8 @@ def main(argv=None) -> int:
                 ap.error("evolve needs at least two versions")
             vs = [(Path(f).name, _secs(f, a.pdf_backend)) for f in a.files]
             r = evolve(vs, a.section, a.match_threshold)
+            for w in r["warnings"]:
+                print(f"warning: {w}", file=sys.stderr)
             summ = None
             if a.summary_file:
                 sp = Path(a.summary_file)

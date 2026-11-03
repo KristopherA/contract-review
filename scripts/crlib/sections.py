@@ -52,7 +52,14 @@ ALWAYS_SHARE = 0.8
 # ...and at least this many pages: in a 2-3 page file "identical on every page" is weak
 # evidence (a clause per page can repeat), so those fall back to the majority rule
 ALWAYS_MIN = 4
-ALT_SHARE = 0.8  # odd/even book pair: each line on 80% of its parity's pages
+ALT_SHARE = 0.8
+CLAUSE_START = re.compile(r"\(?\d{1,3}(?:\.\d{1,3})+\)?[.:]?\s")
+ALT_MIN_PAR = 4  # book pairs need at least 4 body pages of each parity
+
+
+def _mask(t: str) -> str:
+    """Digits masked so 'Page 4' and 'Page 6' are one book-footer line."""
+    return re.sub(r"\d+", "#", t.rstrip(". "))  # odd/even book pair: each line on 80% of its parity's pages
 SENT_END = re.compile(r"[.;?!][\"'\u201d)]?$")
 # a bottom-edge line repeated on fewer pages that ends like a sentence or cites a clause is body text
 KEEP_LINE = re.compile(r"[.;:?!][\"'\u201d)]?$|\b(?:article|section|clause)\s+\d", re.I)
@@ -303,10 +310,10 @@ def _clean_lines(text: str) -> list[str]:
         par: dict[tuple, int] = {}  # (key, page parity) -> body pages
         n_par = [sum(1 for p in body if p % 2 == k) for k in (0, 1)] if body else [0, 0]
         n_wpar = [sum(1 for p in weak if p % 2 == k) for k in (0, 1)]
-        raw: dict[tuple, int] = {}  # (slot, exact line, parity) -> weak body pages (book pairs)
+        raw: dict[tuple, int] = {}  # (slot, digit-masked line, parity) -> weak body pages (book pairs)
         for p, i, slot, t in edges:
-            if p in weak:
-                raw[(slot, t.rstrip(". "), p % 2)] = raw.get((slot, t.rstrip(". "), p % 2), 0) + 1
+            if p in weak and not CLAUSE_START.match(t) and not _classify(t):  # a numbered clause is body
+                raw[(slot, _mask(t), p % 2)] = raw.get((slot, _mask(t), p % 2), 0) + 1
         cand = []  # (page, line, [keys]) computed once per edge line
         var: dict[tuple[int, int], list | None] = {}
         for p, i, slot, t in edges:
@@ -336,19 +343,25 @@ def _clean_lines(text: str) -> list[str]:
                         alt_slots.setdefault((k[0], q), set()).add(k[1])
         book: dict[tuple, set] = {}  # (slot, parity) -> exact lines on >= 80% of that parity
         for (slot, t, q), n in raw.items():
-            if n >= max(3, math.ceil(ALT_SHARE * n_wpar[q])) and raw.get((slot, t, 1 - q), 0) * 2 < n_wpar[1 - q]:
+            if min(n_wpar) >= ALT_MIN_PAR and n >= max(ALT_MIN_PAR, math.ceil(ALT_SHARE * n_wpar[q])) \
+                    and raw.get((slot, t, 1 - q), 0) * 2 < n_wpar[1 - q]:
                 book.setdefault((slot, q), set()).add(t)
 
         def _paired(table, k):  # k alternates with a different line in the same slot
             return any(k[1] in table.get((k[0], q), ()) and (table.get((k[0], 1 - q), set()) - {k[1]})
                        for q in (0, 1))
+        warned: set[str] = set()
         for p, i, t, keys in cand:
             best = max(where.get(k, 0) for k in keys)
             # odd/even book furniture: two different lines alternating in one slot, each on >= 80%
             # of its parity's pages, are both dropped whatever they say; a lone alternating line
             # only as a running title with a partner (draft 12)
-            alt = any(_paired(book, (sl, t.rstrip(". "))) for sl in {k[0] for k in keys}) \
-                or any(_paired(alt_slots, k) for k in keys)
+            booked = any(_paired(book, (sl, _mask(t))) for sl in {k[0] for k in keys})
+            alt = booked or any(_paired(alt_slots, k) for k in keys)
+            if booked and not _classify(t) and BODY_MARK.search(t) and _mask(t) not in warned:
+                warned.add(_mask(t))
+                print(f"warning: page {p + 1}: dropped an odd/even page line with a modal verb, $ or % "
+                      f"as book furniture: {t[:60]!r}", file=sys.stderr)
             if best < 3 and best < need or (p, i) in drop:
                 continue  # not repeated: the common case, decided without regexes
             if _classify(t):

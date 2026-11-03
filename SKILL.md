@@ -70,7 +70,12 @@ python3 $SKILL/scripts/contract_review.py <command> ...
 ## 3. Evolution of one section across versions
 
 1. `python3 $SKILL/scripts/contract_review.py evolve V1 V2 V3 ... --section "Termination"`
-   (name or number such as `§7`; list files oldest first).
+   (list files oldest first). `--section` takes a clause number (`12`, `§12.01`,
+   `Article 12`, `Appendix A 1.02`) or a partial, case-insensitive title (`overtime`).
+   Each version is matched on its own: id, then number, then title (equal, substring,
+   fuzzy), so a renumbered clause is found by title. Other close titles are listed on
+   stderr; an exact tie exits 2 with the candidates, so retry with a number or a longer
+   title. A number query follows the number; use a title to follow a renumbered clause.
 2. Write a 2-4 sentence overall summary to `summary.txt` and optional per-version
    notes to `notes.json` (`{"v2.pdf": "..."}`).
 3. Re-run with `--summary-file summary.txt --notes notes.json --format md > evolution.md`.

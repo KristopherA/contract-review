@@ -55,6 +55,9 @@ DEFINITION = re.compile(r"^(?:\(?[a-z0-9]{1,4}[.)]\s*)?(?P<term>[\"\u201c']?[A-Z
 # a second clause after a definition: ", and the ...", "; ", " and each ..."
 DEF_TAIL = re.compile(r"(?:;\s*|,?\s+(?:and|but)\s+(?=(?:the|an?|each|every|any|all|no|neither|nothing)\s))", re.I)
 # "... and shall be paid": a modal straight after "and" has no subject of its own
+# "... and shall not include holidays": still the definition, not a duty of the term
+DEF_CONT = re.compile(r"(?:shall|will|does|do|must)\s+(?:not\s+)?(?:include|exclude|mean|refer|cover|comprise|"
+                      r"apply|be\s+deemed|be\s+construed|be\s+read|be\s+taken|have\s+the\s+meaning)\b", re.I)
 DEF_BARE = re.compile(r",?\s+and\s+(?=(?:shall|must|will|may|is\s+required\s+to|are\s+required\s+to)\b)", re.I)
 MAX_WHO_WORDS = 8
 MAX_CHUNK = 2000
@@ -144,8 +147,12 @@ def _int_value(toks: list[str]) -> float | None:
 PAIR = re.compile(rf"^(?P<w>{WORDNUM})\s*\((?P<n>\d+(?:\.\d+)?)\)", re.I)
 # "1.07", "3.01": decimal with a zero-led fraction reads as a clause number, not a quantity
 CLAUSE_NUM = re.compile(r"^\d{1,3}\.0\d")
-REF_BEFORE = re.compile(r"(?:\b(?:article|art|section|sub-?section|s|ss|clause|sub-?clause|paragraph|para|"
-                        r"subparagraph|item|schedule|appendix)\.?|§|\b\d{1,3}(?:\.\d{1,3}){1,4}(?:\([a-z0-9]{1,4}\))*)"
+REF_KW = (r"article|art|section|sub-?section|s|ss|clause|sub-?clause|paragraph|para|"
+          r"subparagraph|item|schedule|appendix")
+# a reference just before the bracket: "Article (10)", "§ (10)", "12.01 (10)", and a keyword
+# with its number, "Clause 12 (10)", "in Article 7, (10)", "Appendix A (2)" (draft 14)
+REF_BEFORE = re.compile(rf"(?:\b(?:{REF_KW})\.?(?:\s*(?:\d{{1,3}}[A-Za-z]?|(?-i:[A-Z]))(?:\.\d{{1,3}}){{0,4}}"
+                        r"(?:\([a-z0-9]{1,4}\))*,?)?|§|\b\d{1,3}(?:\.\d{1,3}){1,4}(?:\([a-z0-9]{1,4}\))*,?)"
                         r"\s*\(?\s*$", re.I)
 
 
@@ -180,6 +187,8 @@ def _quantity(snt: str, start: int, v: str) -> str | None:
     if pm:
         wv = _word_value(pm["w"])
         if wv is None or abs(wv - float(pm["n"])) > 1e-9:
+            if REF_BEFORE.search(snt[:start + off]):
+                return None  # "Appendix A (2) days": the letter and bracket are a reference
             q = pm["w"] + q[pm.end():]  # disagreeing bracket: a reference, not the number
         return v[:off] + q
     bare = re.match(r"\((\d+(?:\.\d+)?)\)\s+", q)
@@ -255,6 +264,8 @@ def _scan(snt: str, cite: str, out: dict) -> None:
         if bare and not (tail and tail.start() < bare.start()):
             # "Overtime means ... and shall be paid at 1.5 times": no subject of its own, so
             # the defined term is the subject
+            if DEF_CONT.match(snt, bare.end()):
+                return  # "... and shall not include holidays" scopes the definition
             ob = obligation(f"{d['term'].strip(chr(34) + chr(39) + '“”')} {snt[bare.end():]}")
             if ob:
                 out["obligations"].append({**ob, "cite": cite})

@@ -92,6 +92,8 @@ python3 $S outline contract.pdf --summaries summaries.json --format md   # optio
 python3 $S diff old.docx new.docx > changes.json
 python3 $S diff old.docx new.docx --summaries summaries.json --format md > diff.md
 python3 $S evolve v1.pdf v2.pdf v3.pdf --section "Termination" --format md
+python3 $S evolve v1.pdf v2.pdf --section "Article 12"        # or "§12.01", "Appendix A 1.02"
+python3 $S evolve v1.pdf v2.pdf --section overtime           # partial, case-insensitive title
 ```
 
 Reports are Markdown and open in any Markdown viewer.
@@ -144,8 +146,8 @@ and generate their PDF and DOCX fixtures at run time.
   document with no TOC keeps everything after its first schedule in that
   schedule. Header/footer removal never drops a heading line; the rules are
   pinned by the layout corpus in `tests/layout_cases.py`.
-- Evolve matches a clause by number or by a close title; a short or different
-  name (e.g. a single word for a longer heading) may report it as absent.
+- Evolve matches a clause by id, number, then title (equal, substring, fuzzy) in
+  each version; see Draft 14 rules.
 - DOCX extraction reads the main body only (no headers, footers, comments or
   tracked-change markup; deleted revisions may appear as text).
 - Alignment is greedy and heuristic; low-score matches should be checked.
@@ -168,9 +170,15 @@ references/helper-output.md, "Draft 12 rules".
 
 ## Draft 13 rules
 
-- **Alternating book footers:** if two different plain lines share one slot and alternate by page parity, each on at least 80% of its own parity's body pages and on under half of the other parity's, both are dropped whatever they say. A lone odd-only or even-only line with no partner is still kept.
-- **Boilerplate labels:** a clause label is stripped before matching only if it follows the section's own numbering (12.xx in Article 12) and the numbers go up in order. A paragraph such as "30.5 Employees shall…" blocks the fold.
+- **Alternating book footers:** if two different edge lines (any text, including sentences, modal verbs, $ or %, but not headings or numbered clause lines) share one slot and alternate by page parity, each on at least 80% of its own parity's body pages and on under half of the other parity's, both are dropped (draft 14: only with at least 4 body pages of each parity; digits are masked first, so "Page 4"/"Page 6" count as one line). A dropped line with a modal verb, $ or % prints a stderr warning. A lone odd-only or even-only line with no partner is still kept.
+- **Boilerplate labels:** a clause label is stripped before matching only if it follows the section's own numbering (12.xx in Article 12) and the numbers go up in order. A paragraph such as "30.5 Employees shall…" blocks the fold. In a section with no numeric number (appendix, LOU), the first label sets the numbering and must end in .01 or .1; otherwise no label is stripped (draft 14).
 - **Reference numbers:** after subsection, ss., sub-clause, paragraph, para., subparagraph, item, or a dotted clause number (12.01, 12.01(a)), a bracketed figure is a reference, not a duration.
 - **Subjectless clause after a definition:** "X means … and shall …" gives an obligation whose subject is the defined term.
 - **Restated article:** a repeated clause number in a merged restatement is cited as "N (restated)".
 - **Annex ids:** "APPENDIX A-1: SHIFT" is Appendix A-1 with the title SHIFT.
+
+## Draft 14 rules
+
+- **Evolve section lookup:** `--section` is matched in each version on its own, in this order: exact section id (`s4`); clause number (`12`, `§12`, `Article 12`, `12.01`, `§12.01`, `Appendix A 1.02`; a cite inside a section returns that section); title equal (case-insensitive); title substring (`overtime` finds `OVERTIME AND CALL-BACK`; the tightest title wins); fuzzy title (rapidfuzz, score 70+). A renumbered clause is still found by title. If a version has no match, the previous version's section is followed by alignment. When other titles also match, the best is used and the rest are listed on stderr (`warning: ... also close: ...`). If the best candidates tie exactly (e.g. `overtime` for `OVERTIME RATES` and `OVERTIME BANKS`), evolve exits 2 and lists them; use a number or a longer title. A number query follows the number, so after renumbering it may find a different clause; query by title to follow one clause. Each timeline entry has `matched_by` (`id`, `number`, `title`, `title-substring`, `title-fuzzy`, `aligned`) and, for a cite, `matched_part`.
+- **References:** a keyword with its number before a bracket is a reference, not a duration: "Clause 12 (10) days", "in Article 7, (10) days", "Appendix A (2) days".
+- **Definitions:** "A day means ... and shall not include holidays" (include, exclude, mean, apply, be deemed ...) stays part of the definition; no obligation is made for the term.

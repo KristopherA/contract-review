@@ -222,3 +222,16 @@ case("cover + alternating book footers on 11 body pages dropped",
 case("alternating book footers, one odd page missing its line (80%), dropped",
      arts(10, f=lambda k: {} if k == 3 else alt_book(10)(k)), tree_art(10), amounts=money(10),
      gone=["Pension", YEARS], obligations=10, clean=True)
+
+
+# ---- draft 14: digit-masked book pairs, 4 pages per parity ----
+def pension_page(k):
+    return {"bottom": [PENSION + "." if k % 2 else f"Page {k}"]}
+
+
+case("Pension sentence on odd pages + 'Page N' on even pages dropped",
+     arts(10, f=pension_page), tree_art(10), amounts=money(10), gone=["Pension", "Page "], obligations=10, clean=True)
+case("Pension sentence + 'Page N' book pair on 3 pages per parity kept (needs 4)",
+     arts(6, f=pension_page), tree_art(6), amounts=money(6), keep=["Pension"], clean=True)
+case("alternating book footers on 3 pages per parity: Pension sentence kept (needs 4)",
+     arts(6, f=alt_book(6)), tree_art(6), amounts=money(6), keep=["Pension"], clean=True)
